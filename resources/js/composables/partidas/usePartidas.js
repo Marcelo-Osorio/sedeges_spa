@@ -6,7 +6,6 @@ const oPartida = ref({
     id: 0,
     nro_partida: "",
     nombre: "",
-    abreviatura: "",
     _method: "POST",
 });
 
@@ -139,7 +138,6 @@ export const usePartidas = () => {
             oPartida.value.id = item.id;
             oPartida.value.nro_partida = item.nro_partida;
             oPartida.value.nombre = item.nombre;
-            oPartida.value.abreviatura = item.abreviatura;
             oPartida.value._method = "PUT";
             return oPartida;
         }
@@ -150,7 +148,6 @@ export const usePartidas = () => {
         oPartida.value.id = 0;
         oPartida.value.nro_partida = "";
         oPartida.value.nombre = "";
-        oPartida.value.abreviatura = "";
         oPartida.value._method = "POST";
     };
 

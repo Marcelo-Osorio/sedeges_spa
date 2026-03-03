@@ -23,8 +23,16 @@ const columns = [
         data: "id",
     },
     {
-        title: "NOMBRE PRODUCTO",
+        title: "NOMBRE",
         data: "nombre",
+    },
+    {
+        title: "GRUPO",
+        data: "grupo",
+    },
+    {
+        title: "ABREVIATURA",
+        data: "abreviatura",
     },
     {
         title: "FECHA DE REGISTRO",
@@ -179,6 +187,8 @@ onBeforeUnmount(() => {
                         <thead>
                             <tr>
                                 <th width="2%"></th>
+                                <th></th>
+                                <th></th>
                                 <th></th>
                                 <th></th>
                                 <th width="2%"></th>

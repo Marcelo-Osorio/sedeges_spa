@@ -64,6 +64,8 @@ const enviarFormulario = () => {
         axios
             .post(url, {
                 nombre: form.nombre,
+                grupo: form.grupo,
+                abreviatura: form.abreviatura,
             })
             .then((response) => {
                 dialog.value = false;
@@ -183,8 +185,8 @@ onMounted(() => {});
                 <div class="modal-body">
                     <form @submit.prevent="enviarFormulario()">
                         <div class="row">
-                            <div class="col-md-12">
-                                <label>Nombre Producto*</label>
+                            <div class="col-md-6 mb-2">
+                                <label>Nombre*</label>
                                 <input
                                     type="text"
                                     class="form-control"
@@ -201,6 +203,26 @@ onMounted(() => {});
                                         {{ form.errors?.nombre }}
                                     </li>
                                 </ul>
+                            </div>
+                            <div class="col-md-3 mb-2">
+                                <label>Grupo</label>
+                                <select
+                                    class="form-control"
+                                    v-model="form.grupo"
+                                >
+                                    <option value="">- Seleccione -</option>
+                                    <option value="PRODUCTOS">PRODUCTOS</option>
+                                    <option value="TRAMITES">TRAMITES</option>
+                                    <option value="REGISTROS">REGISTROS</option>
+                                </select>
+                            </div>
+                            <div class="col-md-3 mb-2">
+                                <label>Abreviatura</label>
+                                <input
+                                    type="text"
+                                    class="form-control"
+                                    v-model="form.abreviatura"
+                                />
                             </div>
                         </div>
                     </form>

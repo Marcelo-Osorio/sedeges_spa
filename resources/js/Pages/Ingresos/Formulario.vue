@@ -263,7 +263,7 @@ const agregaFila = () => {
         id: 0,
         partida_id: "",
         donacion: "",
-        producto_id: "",
+        item_id: "",
         unidad_medida_id: "",
         cantidad: "",
         costo: "",
@@ -677,9 +677,9 @@ onMounted(() => {});
                                                     :class="{
                                                         'border border-red':
                                                             form.errors
-                                                                ?.producto_id,
+                                                                ?.item_id,
                                                     }"
-                                                    v-model="item.producto_id"
+                                                    v-model="item.item_id"
                                                     filterable
                                                 >
                                                     <el-option value=""

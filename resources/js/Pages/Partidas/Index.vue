@@ -31,10 +31,6 @@ const columns = [
         data: "nombre",
     },
     {
-        title: "ABREVIATURA",
-        data: "abreviatura",
-    },
-    {
         title: "FECHA DE REGISTRO",
         data: "fecha_registro_t",
     },
@@ -183,7 +179,6 @@ onBeforeUnmount(() => {
                         <thead>
                             <tr>
                                 <th width="2%"></th>
-                                <th></th>
                                 <th></th>
                                 <th></th>
                                 <th></th>

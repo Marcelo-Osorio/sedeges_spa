@@ -1,0 +1,284 @@
+:root {
+    --principal: #242424;
+    --principal_hover: #40a5f7;
+    --principal_transparent: #669db9c9;
+    --secundario: #ffffff;
+    --secundario_hover: #c8e6e6;
+    --fondo_app: #e8e9eb;
+    --correcto: #d2e7c9;
+    --transparente: #000000bd;
+    --secundarion_transparente: #a14609d0;
+    --progress: #4b5563;
+}
+
+.bg-principal {
+    background: var(--principal) !important;
+}
+
+.mr-1{
+    margin-right: 3px;
+}
+
+html {
+    overflow-y: scroll;
+    overflow-y: overlay;
+}
+
+.formulario {
+    position: relative;
+}
+.loading {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(255, 255, 255, 0.89);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-size: 1.3rem;
+    z-index: 200;
+    color: gray;
+}
+
+.text-gray {
+    color: gray;
+}
+
+.text-right {
+    text-align: right;
+}
+.text-left {
+    text-align: left;
+}
+.text-center {
+    text-align: center;
+}
+.font-weight-bold {
+    font-weight: bold;
+}
+
+.pace .pace-activity,
+.pace .pace-progress {
+    top: 0px;
+}
+
+#sidebar {
+    background-color: white;
+    overflow: auto;
+    scrollbar-width: thin; /* Firefox */
+    scrollbar-color: #acabab #e0e0e0; /* Firefox */
+}
+
+/* Estilo para navegadores basados en WebKit (Chrome, Safari) */
+#sidebar::-webkit-scrollbar {
+    width: 8px;
+}
+
+#sidebar::-webkit-scrollbar-thumb {
+    background-color: #acabab; /* Color de la barra de desplazamiento */
+    border-radius: 10px;
+}
+
+#sidebar::-webkit-scrollbar-thumb:hover {
+    background-color: #acabab; /* Color al pasar el cursor */
+}
+
+#sidebar::-webkit-scrollbar-track {
+    background-color: #e0e0e0; /* Color de fondo de la barra */
+}
+
+.app-sidebar {
+    background-color: var(--principal) !important;
+}
+
+/* #modal-dialog-form .modal-dialog .modal-content{
+    width: calc(100vw - 90px);
+} */
+
+.modal-open .modal {
+    background-color: rgba(0, 0, 0, 0.582);
+}
+
+.app-default {
+    display: flex;
+    width: 100%;
+    min-height: auto;
+    background-image: url(../template/media/misc/bg-1.png) !important;
+    background-repeat: repeat;
+}
+
+body {
+    height: 100%;
+}
+
+.ubicacion,
+iframe {
+    width: 100%;
+}
+
+.text-secundario {
+    color: var(--secundario);
+}
+
+.v-container,
+.v-container table,
+.v-container input,
+.v-container label,
+.v-container button {
+    font-size: 0.95em;
+    font-weight: 500;
+}
+
+.swal2-container {
+    z-index: 9999;
+}
+
+.v-main {
+    background-color: var(--fondo_app);
+}
+
+.v-footer {
+    position: relative;
+    padding: 0px;
+    padding-left: 20px;
+    padding-right: 20px;
+}
+
+.btn_principal {
+    cursor: pointer;
+    background-color: var(--principal);
+    color: white;
+    padding: 10px;
+}
+
+.bg-loading {
+    background-color: var(--transparente);
+}
+
+/* SIDEBAR */
+.__sidebar .active {
+    border-radius: 8px;
+    background-color: var(--principal);
+    color: var(--secundario_hover);
+}
+
+/* Estilo del contenedor del cajón de navegación */
+.v-navigation-drawer__content {
+    border-radius: 0px !important;
+    /* Altura máxima y desbordamiento para permitir el desplazamiento */
+    max-height: 100%;
+    overflow-y: auto;
+    position: relative;
+
+    /* Estilo del fondo gris claro y bordes redondeados */
+    border-top-left-radius: 10px;
+    border-bottom-left-radius: 10px;
+
+    /* Estilo de la barra de desplazamiento solo cuando se hace hover */
+    transition: 0.3s; /* Agrega una transición suave para una mejor experiencia de usuario */
+}
+
+/* Estilo específico de la barra de desplazamiento para navegadores basados en WebKit (como Chrome y Safari) */
+.v-navigation-drawer__content::-webkit-scrollbar {
+    width: 8px;
+}
+
+.v-navigation-drawer__content::-webkit-scrollbar-thumb {
+    background-color: #d0d0d0;
+    border-radius: 10px; /* Bordes redondeados para el pulgar */
+    position: absolute !important;
+    right: 0;
+}
+
+.v-navigation-drawer__content::-webkit-scrollbar-track {
+    background-color: #f2f2f2;
+    border-radius: 10px; /* Bordes redondeados para la pista */
+}
+
+/* Ocultar las flechas del scroll */
+.v-navigation-drawer__content {
+    scrollbar-arrow-color: transparent;
+}
+
+.__sidebar .v-list-item {
+    display: flex;
+    align-items: center;
+}
+
+.__sidebar .v-list-item .v-list-item__prepend {
+    width: 30px;
+    margin-bottom: 1.5px;
+}
+
+.__sidebar .v-list-item .v-list-item__content {
+    flex: 1;
+}
+
+.__sidebar .v-list-item .v-list-item__content .v-list-item-title {
+    font-size: 0.8em;
+}
+
+.__sidebar .v-list-group__items .v-list-item {
+    padding-inline-start: 30px !important;
+}
+
+.__sidebar .v-list-group__items .v-list-item.active,
+.__sidebar .v-list-group__items .v-list-item.active .v-list-item__overlay {
+    background: none;
+    background-color: none;
+    color: var(--principal);
+}
+
+/* NAVBAR */
+.__navbar {
+    background-color: var(--principal) !important;
+}
+
+.__navbar .contenedor_navbar {
+    display: flex;
+    flex-direction: row;
+    width: 100%;
+    height: 100%;
+    align-items: center;
+    justify-content: space-between;
+    box-sizing: inherit;
+    padding-left: 0px;
+    padding-right: 20px;
+}
+
+.__navbar .contenedor_navbar .inicio {
+    display: flex;
+    align-items: center;
+    color: white;
+    height: 100%;
+}
+
+.__navbar .contenedor_navbar .inicio .logo {
+    padding: 15px;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    height: 100%;
+    width: 90px;
+}
+
+.__navbar .contenedor_navbar .inicio .logo .__img {
+    display: flex;
+    height: 100%;
+}
+.__navbar .contenedor_navbar .inicio .logo .__img img {
+    height: 100%;
+}
+.__navbar .contenedor_navbar .inicio .logo span {
+    flex: 1;
+}
+
+.__navbar .contenedor_navbar .inicio .acciones {
+    flex: 1;
+}
+.__navbar .contenedor_navbar .user {
+    display: flex;
+    align-items: center;
+}

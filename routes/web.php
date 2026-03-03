@@ -8,9 +8,8 @@ use App\Http\Controllers\EgresoController;
 use App\Http\Controllers\IEInternoController;
 use App\Http\Controllers\IngresoController;
 use App\Http\Controllers\InicioController;
-use App\Http\Controllers\PacienteController;
+use App\Http\Controllers\CatalogoItemController;
 use App\Http\Controllers\PartidaController;
-use App\Http\Controllers\ProductoController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\ProgramaController;
 use App\Http\Controllers\ReporteController;
@@ -147,11 +146,11 @@ Route::middleware(['auth', 'permisoUsuario'])->prefix("admin")->group(function (
     );
 
     // PRODUCTOS
-    Route::get("productos/api", [ProductoController::class, 'api'])->name("productos.api");
-    Route::get("productos/paginado", [ProductoController::class, 'paginado'])->name("productos.paginado");
-    Route::get("productos/listado", [ProductoController::class, 'listado'])->name("productos.listado");
-    Route::post("productos/storeJson", [ProductoController::class, 'storeJson'])->name("productos.storeJson");
-    Route::resource("productos", ProductoController::class)->only(
+    Route::get("productos/api", [CatalogoItemController::class, 'api'])->name("productos.api");
+    Route::get("productos/paginado", [CatalogoItemController::class, 'paginado'])->name("productos.paginado");
+    Route::get("productos/listado", [CatalogoItemController::class, 'listado'])->name("productos.listado");
+    Route::post("productos/storeJson", [CatalogoItemController::class, 'storeJson'])->name("productos.storeJson");
+    Route::resource("productos", CatalogoItemController::class)->only(
         ["index", "store", "update", "show", "destroy"]
     );
 

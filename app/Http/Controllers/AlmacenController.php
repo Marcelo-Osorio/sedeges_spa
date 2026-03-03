@@ -6,7 +6,6 @@ use App\Models\Almacen;
 use App\Models\Egreso;
 use App\Models\IEInterno;
 use App\Models\Ingreso;
-use App\Models\Producto;
 use App\Models\UserAlmacen;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;

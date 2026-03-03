@@ -3,7 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\HistorialAccion;
-use App\Models\Ingreso;
+use App\Models\IngresoDetalle;
 use App\Models\Partida;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -16,7 +16,6 @@ class PartidaController extends Controller
     public $validacion = [
         "nro_partida" => "required|min:1",
         "nombre" => "required|min:1",
-        "abreviatura" => "required|min:1",
     ];
 
     public $mensajes = [
@@ -24,8 +23,6 @@ class PartidaController extends Controller
         "nro_partida.min" => "Debes ingresar al menos :min caracteres",
         "nombre.required" => "Este campo es obligatorio",
         "nombre.min" => "Debes ingresar al menos :min caracteres",
-        "abreviatura.required" => "Este campo es obligatorio",
-        "abreviatura.min" => "Debes ingresar al menos :min caracteres",
     ];
 
     public function index()
@@ -134,7 +131,7 @@ class PartidaController extends Controller
     {
         DB::beginTransaction();
         try {
-            $usos = Ingreso::where("partida_id", $partida->id)->get();
+            $usos = IngresoDetalle::where("partida_id", $partida->id)->get();
             if (count($usos) > 0) {
                 throw ValidationException::withMessages([
                     'error' =>  "No es posible eliminar este registro porque esta siendo utilizado por otros registros",

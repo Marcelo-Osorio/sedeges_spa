@@ -75,7 +75,7 @@ class IngresoController extends Controller
                     "ingreso_id" => $i->ingreso_id,
                     "almacen_id" => $i->almacen_id,
                     "partida_id" => $i->partida_id,
-                    "producto_id" => $i->producto_id,
+                    "item_id" => $i->item_id,
                     "cantidad" => $i->cantidad,
                     "costo" => $i->costo,
                     "total" => $i->total,
@@ -85,7 +85,7 @@ class IngresoController extends Controller
         }
 
         // recargar registros
-        $ingreso_detalles = IngresoDetalle::with(["unidad_medida", "producto", "ingreso", "egreso.destino"])->select("ingreso_detalles.*");
+        $ingreso_detalles = IngresoDetalle::with(["unidad_medida", "producto", "ingreso", "egreso.destino", "partida"])->select("ingreso_detalles.*");
         $ingreso_detalles->where("almacen_id", $almacen_id);
         $ingreso_detalles->where("partida_id", $partida_id);
 
@@ -166,7 +166,7 @@ class IngresoController extends Controller
                     "unidad_id" => $nuevo_ingreso->unidad_id,
                     "partida_id" => $item["partida_id"],
                     "donacion" => $nuevo_ingreso->donacion,
-                    "producto_id" => $item["producto_id"],
+                    "item_id" => $item["item_id"],
                     "unidad_medida_id" => $item["unidad_medida_id"],
                     "cantidad" => $item["cantidad"],
                     "costo" => $item["costo"],
@@ -253,8 +253,6 @@ class IngresoController extends Controller
     {
         DB::beginTransaction();
         try {
-            $gestion = date("Y", strtotime($request["fecha_ingreso"]));
-            $array_codigo = Ingreso::getCodigoIngresoPartida($request["almacen_id"], $request["partida_id"], $gestion);
             $data_ingreso = [
                 "codigo" => $request["codigo"],
                 "donacion" => $request["donacion"],
@@ -281,7 +279,7 @@ class IngresoController extends Controller
                     "unidad_id" => $ingreso->unidad_id,
                     "partida_id" => $item["partida_id"],
                     "donacion" => $request["donacion"],
-                    "producto_id" => $item["producto_id"],
+                    "item_id" => $item["item_id"],
                     "unidad_medida_id" => $item["unidad_medida_id"],
                     "cantidad" => $item["cantidad"],
                     "costo" => $item["costo"],

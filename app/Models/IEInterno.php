@@ -11,7 +11,7 @@ class IEInterno extends Model
 
     protected $fillable = [
         "almacen_id",
-        "producto_id",
+        "item_id",
         "ingreso_id",
         "ingreso_detalle_id",
         "egreso_id",
@@ -58,7 +58,7 @@ class IEInterno extends Model
 
     public function producto()
     {
-        return $this->belongsTo(Producto::class, 'producto_id');
+        return $this->belongsTo(CatalogoItem::class, 'item_id');
     }
 
     public function ingreso()

@@ -360,7 +360,7 @@ class ReporteController extends Controller
                                         $sum_reg_ingresos->where('ingresos.almacen_id', $almacen->id);
                                         $sum_reg_ingresos->where('fecha_registro', '<', $fecha_ini);
                                         $sum_reg_ingresos->where('partida_id', $partida->id);
-                                        $sum_reg_ingresos->where('producto_id', $ingreso->producto_id);
+                                        $sum_reg_ingresos->where('item_id', $ingreso->item_id);
                                         // EXTERNO
                                         $user = Auth::user();
                                         if ($user->tipo == 'EXTERNO') {
@@ -381,7 +381,7 @@ class ReporteController extends Controller
                                         $reg_egresos->where('egresos.almacen_id', $almacen->id);
                                         $reg_egresos->where('egresos.fecha_registro', '<', $fecha_ini);
                                         $reg_egresos->where('egresos.partida_id', $partida->id);
-                                        $reg_egresos->where('egresos.producto_id', $ingreso->producto_id);
+                                        $reg_egresos->where('egresos.item_id', $ingreso->item_id);
                                         // EXTERNO
                                         $user = Auth::user();
                                         if ($user->tipo == 'EXTERNO') {
@@ -818,7 +818,7 @@ class ReporteController extends Controller
                                         $sum_reg_ingresos->where('ingresos.almacen_id', $almacen->id);
                                         $sum_reg_ingresos->where('fecha_registro', '<', $fecha_ini);
                                         $sum_reg_ingresos->where('partida_id', $partida->id);
-                                        $sum_reg_ingresos->where('producto_id', $ingreso->producto_id);
+                                        $sum_reg_ingresos->where('item_id', $ingreso->item_id);
                                         // EXTERNO
                                         $user = Auth::user();
                                         if ($user->tipo == 'EXTERNO') {
@@ -837,7 +837,7 @@ class ReporteController extends Controller
                                         $reg_egresos->where('egresos.almacen_id', $almacen->id);
                                         $reg_egresos->where('egresos.fecha_registro', '<', $fecha_ini);
                                         $reg_egresos->where('egresos.partida_id', $partida->id);
-                                        $reg_egresos->where('egresos.producto_id', $ingreso->producto_id);
+                                        $reg_egresos->where('egresos.item_id', $ingreso->item_id);
                                         // EXTERNO
                                         $user = Auth::user();
                                         if ($user->tipo == 'EXTERNO') {
@@ -1502,7 +1502,7 @@ class ReporteController extends Controller
                                         $sum_reg_ingresos->where('ingresos.almacen_id', $almacen->id);
                                         $sum_reg_ingresos->where('fecha_registro', '<', $fecha_ini);
                                         $sum_reg_ingresos->where('partida_id', $partida->id);
-                                        $sum_reg_ingresos->where('producto_id', $ingreso->producto_id);
+                                        $sum_reg_ingresos->where('item_id', $ingreso->item_id);
                                         // EXTERNO
                                         $user = Auth::user();
                                         if ($user->tipo == 'EXTERNO') {
@@ -1521,7 +1521,7 @@ class ReporteController extends Controller
                                         $reg_egresos->where('egresos.almacen_id', $almacen->id);
                                         $reg_egresos->where('egresos.fecha_registro', '<', $fecha_ini);
                                         $reg_egresos->where('egresos.partida_id', $partida->id);
-                                        $reg_egresos->where('egresos.producto_id', $ingreso->producto_id);
+                                        $reg_egresos->where('egresos.item_id', $ingreso->item_id);
                                         // EXTERNO
                                         $user = Auth::user();
                                         if ($user->tipo == 'EXTERNO') {
@@ -1676,7 +1676,7 @@ class ReporteController extends Controller
                                         $sum_reg_ingresos->where('i_e_internos.almacen_id', $almacen->id);
                                         $sum_reg_ingresos->where('i_e_internos.fecha_registro', '<', $fecha_ini);
                                         $sum_reg_ingresos->where('partida_id', $partida->id);
-                                        $sum_reg_ingresos->where('i_e_internos.producto_id', $ie_interno->producto_id);
+                                        $sum_reg_ingresos->where('i_e_internos.item_id', $ie_interno->item_id);
                                         // EXTERNO
                                         $user = Auth::user();
                                         if ($user->tipo == 'EXTERNO') {
@@ -1696,7 +1696,7 @@ class ReporteController extends Controller
                                         $reg_egresos->where('i_e_internos.almacen_id', $almacen->id);
                                         $reg_egresos->where('i_e_internos.fecha_egreso', '<', $fecha_ini);
                                         $reg_egresos->where('partida_id', $partida->id);
-                                        $reg_egresos->where('i_e_internos.producto_id', $ie_interno->producto_id);
+                                        $reg_egresos->where('i_e_internos.item_id', $ie_interno->item_id);
                                         // EXTERNO
                                         $user = Auth::user();
                                         if ($user->tipo == 'EXTERNO') {

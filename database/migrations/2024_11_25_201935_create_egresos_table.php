@@ -6,20 +6,18 @@ use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
-    /**
-     * Run the migrations.
-     */
     public function up(): void
     {
         Schema::create('egresos', function (Blueprint $table) {
             $table->id();
             $table->unsignedBigInteger("ingreso_id")->nullable();
+            $table->unsignedBigInteger("ingreso_detalle_id");
             $table->unsignedBigInteger("almacen_id");
             $table->unsignedBigInteger("partida_id")->nullable();
-            $table->unsignedBigInteger("producto_id");
+            $table->unsignedBigInteger("item_id");
             $table->unsignedBigInteger("destino_id")->nullable();
-            $table->integer("cantidad");
-            $table->decimal("costo", 24, 2);
+            $table->integer("cantidad")->nullable();
+            $table->decimal("costo", 24, 2)->nullable();
             $table->decimal("total", 24, 2);
             $table->date("fecha_registro")->nullable();
             $table->integer("editable")->default(1);
@@ -28,14 +26,10 @@ return new class extends Migration
             $table->foreign("ingreso_id")->on("ingresos")->references("id");
             $table->foreign("almacen_id")->on("almacens")->references("id");
             $table->foreign("partida_id")->on("partidas")->references("id");
-            $table->foreign("producto_id")->on("productos")->references("id");
-            $table->foreign("destino_id")->on("almacens")->references("id");
+            $table->foreign("item_id")->on("catalogo_items")->references("id");
         });
     }
 
-    /**
-     * Reverse the migrations.
-     */
     public function down(): void
     {
         Schema::dropIfExists('egresos');

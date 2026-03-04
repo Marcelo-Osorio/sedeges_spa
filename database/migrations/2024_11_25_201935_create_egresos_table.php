@@ -24,6 +24,7 @@ return new class extends Migration
             $table->timestamps();
 
             $table->foreign("ingreso_id")->on("ingresos")->references("id");
+            $table->foreign("ingreso_detalle_id")->on("ingreso_detalles")->references("id");
             $table->foreign("almacen_id")->on("almacens")->references("id");
             $table->foreign("partida_id")->on("partidas")->references("id");
             $table->foreign("item_id")->on("catalogo_items")->references("id");

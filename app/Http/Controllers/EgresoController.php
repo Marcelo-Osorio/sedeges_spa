@@ -29,7 +29,7 @@ class EgresoController extends Controller
             $egreso->cantidad = $cantidad;
 
             // editable?
-            if ($egreso->cantidad == $egreso->ingreso->cantidad) {
+            if ($egreso->cantidad == $egreso->ingreso_detalle->cantidad) {
                 $egreso->editable = 0;
             }
             $egreso->save();

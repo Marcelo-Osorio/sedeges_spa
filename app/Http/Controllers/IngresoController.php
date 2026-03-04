@@ -49,7 +49,7 @@ class IngresoController extends Controller
         $almacen_id = $request->almacen_id;
         $partida_id = $request->partida_id;
 
-        $ingreso_detalles = IngresoDetalle::with(["ingreso"])->select("ingreso_detalles.*");
+        $ingreso_detalles = IngresoDetalle::with(["ingreso", "producto"])->select("ingreso_detalles.*");
         $ingreso_detalles->where("almacen_id", $almacen_id);
         $ingreso_detalles->where("partida_id", $partida_id);
         if ($user->tipo == 'EXTERNO') {
@@ -122,7 +122,7 @@ class IngresoController extends Controller
         $ingresos = Ingreso::select("ingresos.*");
 
         if (trim($search) != "") {
-            $ingresos->where("nombre", "LIKE", "%$search%");
+            $ingresos->where("codigo", "LIKE", "%$search%");
         }
 
         $ingresos = $ingresos->paginate($request->itemsPerPage);

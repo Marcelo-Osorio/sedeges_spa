@@ -316,8 +316,8 @@
                                     // EXTERNO
                                     $user = Auth::user();
                                     if ($user->tipo == 'EXTERNO') {
-                                        $ingresos->where('ingresos.unidad_id', $user->unidad_id);
-                                        $ingresos->where('ingresos.user_id', $user->id);
+                                        $sum_reg_ingresos->where('ingresos.unidad_id', $user->unidad_id);
+                                        $sum_reg_ingresos->where('ingresos.user_id', $user->id);
                                     }
 
                                     $sum_reg_ingresos = $sum_reg_ingresos->sum('ingreso_detalles.total');

@@ -397,7 +397,7 @@ class ReporteController extends Controller
                                     $sheet->setCellValue('C' . $fila, $ingreso->unidad_medida->nombre);
                                     $sheet->setCellValue('D' . $fila, $ingreso->producto->nombre);
                                     $sheet->setCellValue('G' . $fila, $saldo);
-                                    $sheet->setCellValue('H' . $fila, $ingreso->fecha_ingreso_t);
+                                    $sheet->setCellValue('H' . $fila, $ingreso->ingreso->fecha_ingreso_t);
                                     $sheet->setCellValue('I' . $fila, $ingreso->cantidad);
                                     $sheet->setCellValue('J' . $fila, $ingreso->costo);
                                     $sheet->setCellValue('K' . $fila, $ingreso->total);
@@ -853,7 +853,7 @@ class ReporteController extends Controller
                                     $sheet->setCellValue('C' . $fila, $ingreso->unidad_medida->nombre);
                                     $sheet->setCellValue('D' . $fila, $ingreso->producto->nombre);
                                     $sheet->setCellValue('G' . $fila, $saldo);
-                                    $sheet->setCellValue('H' . $fila, $ingreso->fecha_ingreso_t);
+                                    $sheet->setCellValue('H' . $fila, $ingreso->ingreso->fecha_ingreso_t);
                                     $sheet->setCellValue('I' . $fila, $ingreso->cantidad);
                                     $sheet->setCellValue('J' . $fila, $ingreso->costo);
                                     $sheet->setCellValue('K' . $fila, $ingreso->total);
@@ -1537,7 +1537,7 @@ class ReporteController extends Controller
                                     $sheet->setCellValue('C' . $fila, $ingreso->unidad_medida->nombre);
                                     $sheet->setCellValue('D' . $fila, $ingreso->producto->nombre);
                                     $sheet->setCellValue('G' . $fila, $saldo);
-                                    $sheet->setCellValue('H' . $fila, $ingreso->fecha_ingreso_t);
+                                    $sheet->setCellValue('H' . $fila, $ingreso->ingreso->fecha_ingreso_t);
                                     $sheet->setCellValue('I' . $fila, $ingreso->cantidad);
                                     $sheet->setCellValue('J' . $fila, $ingreso->costo);
                                     $sheet->setCellValue('K' . $fila, $ingreso->total);

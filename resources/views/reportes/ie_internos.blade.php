@@ -324,8 +324,8 @@
                                         // EXTERNO
                                         $user = Auth::user();
                                         if ($user->tipo == 'EXTERNO') {
-                                            $ingresos->where('ingresos.unidad_id', $user->unidad_id);
-                                            $ingresos->where('ingresos.user_id', $user->id);
+                                            $sum_reg_ingresos->where('ingresos.unidad_id', $user->unidad_id);
+                                            $sum_reg_ingresos->where('ingresos.user_id', $user->id);
                                         }
 
                                         $sum_reg_ingresos = $sum_reg_ingresos->sum('ingreso_detalles.total');
@@ -576,14 +576,13 @@
                                     // total partridas
                                     $totalp1 += (float) $saldo;
                                     $totalp2 += (float) $ie_interno->itotal;
-                                    $totalp3 += (float) $ie_interno->total;
+                                    $totalp3 += (float) $ie_interno->etotal;
                                     $totalp4 += (float) $ie_interno->s_total;
-                                    // Illuminate\Support\Facades\Log::debug('DD');
 
                                     // totalgeneral
                                     $total1 += (float) $saldo;
                                     $total2 += (float) $ie_interno->itotal;
-                                    $total3 += (float) $ie_interno->total;
+                                    $total3 += (float) $ie_interno->etotal;
                                     $total4 += (float) $ie_interno->s_total;
                                 @endphp
                             @empty

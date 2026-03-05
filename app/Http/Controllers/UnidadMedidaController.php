@@ -3,9 +3,9 @@
 namespace App\Http\Controllers;
 
 use App\Models\HistorialAccion;
-use App\Models\Ingreso;
+use App\Models\IngresoDetalle;
 use App\Models\UnidadMedida;
-use Dotenv\Exception\ValidationException;
+use Illuminate\Validation\ValidationException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -131,7 +131,7 @@ class UnidadMedidaController extends Controller
     {
         DB::beginTransaction();
         try {
-            $usos = Ingreso::where("unidad_medida_id", $unidad_medida->id)->get();
+            $usos = IngresoDetalle::where("unidad_medida_id", $unidad_medida->id)->get();
             if (count($usos) > 0) {
                 throw ValidationException::withMessages([
                     'error' =>  "No es posible eliminar este registro porque esta siendo utilizado por otros registros",

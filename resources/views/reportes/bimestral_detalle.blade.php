@@ -259,10 +259,11 @@
                         // INGRESOS RANGO FECHAS
                         $ingresos = App\Models\IngresoDetalle::select('ingreso_detalles.*')
                             ->join('ingresos', 'ingresos.id', '=', 'ingreso_detalles.ingreso_id')
-                            ->where('ingresos.donacion', 'SI');
+                            ->where('ingresos.donacion', 'NO');
                         $ingresos->where('ingreso_detalles.almacen_id', $almacen->id);
+                        $ingresos->where('ingreso_detalles.partida_id', $partida->id);
                         if ($fecha_ini && $fecha_fin) {
-                            $ingresos->whereBetween('fecha_registro', [$fecha_ini, $fecha_fin]);
+                            $ingresos->whereBetween('ingresos.fecha_ingreso', [$fecha_ini, $fecha_fin]);
                         }
 
                         // EXTERNO
@@ -271,8 +272,6 @@
                             $ingresos->where('ingresos.unidad_id', $user->unidad_id);
                             $ingresos->where('ingresos.user_id', $user->id);
                         }
-
-                        $ingresos->where('partida_id', $partida->id);
                         $ingresos = $ingresos->get();
                     @endphp
                     @php
@@ -282,10 +281,10 @@
                         if ($fecha_ini && $fecha_fin) {
                             $reg_ingresos = App\Models\IngresoDetalle::select('ingreso_detalles.*')
                                 ->join('ingresos', 'ingresos.id', '=', 'ingreso_detalles.ingreso_id')
-                                ->where('ingresos.donacion', 'SI');
+                                ->where('ingresos.donacion', 'NO');
                             $reg_ingresos->where('ingreso_detalles.almacen_id', $almacen->id);
-                            $reg_ingresos->where('fecha_registro', '<', $fecha_ini);
-                            $reg_ingresos->where('partida_id', $partida->id);
+                            $reg_ingresos->where('ingresos.fecha_ingreso', '<', $fecha_ini);
+                            $reg_ingresos->where('ingreso_detalles.partida_id', $partida->id);
 
                             // EXTERNO
                             $user = Auth::user();
@@ -309,11 +308,11 @@
                                 if ($fecha_ini && $fecha_fin) {
                                     $sum_reg_ingresos = App\Models\IngresoDetalle::select('ingreso_detalles.*')
                                         ->join('ingresos', 'ingresos.id', '=', 'ingreso_detalles.ingreso_id')
-                                        ->where('ingresos.donacion', 'SI');
+                                        ->where('ingresos.donacion', 'NO');
                                     $sum_reg_ingresos->where('ingreso_detalles.almacen_id', $almacen->id);
-                                    $sum_reg_ingresos->where('fecha_registro', '<', $fecha_ini);
-                                    $sum_reg_ingresos->where('partida_id', $partida->id);
-                                    $sum_reg_ingresos->where('item_id', $ingreso->item_id);
+                                    $sum_reg_ingresos->where('ingresos.fecha_ingreso', '<', $fecha_ini);
+                                    $sum_reg_ingresos->where('ingreso_detalles.partida_id', $partida->id);
+                                    $sum_reg_ingresos->where('ingreso_detalles.item_id', $ingreso->item_id);
                                     // EXTERNO
                                     $user = Auth::user();
                                     if ($user->tipo == 'EXTERNO') {
@@ -324,10 +323,10 @@
 
                                     $reg_egresos = App\Models\IngresoDetalle::select('ingreso_detalles.*')
                                         ->join('ingresos', 'ingresos.id', '=', 'ingreso_detalles.ingreso_id')
-                                        ->where('ingresos.donacion', 'SI')
+                                        ->where('ingresos.donacion', 'NO')
                                         ->join('egresos', 'egresos.ingreso_detalle_id', '=', 'ingreso_detalles.id');
                                     $reg_egresos->where('egresos.almacen_id', $almacen->id);
-                                    $reg_egresos->where('egresos.fecha_registro', '<', $fecha_ini);
+                                    $reg_egresos->where('ingresos.fecha_ingreso', '<', $fecha_ini);
                                     $reg_egresos->where('egresos.partida_id', $partida->id);
                                     $reg_egresos->where('egresos.item_id', $ingreso->item_id);
                                     // EXTERNO

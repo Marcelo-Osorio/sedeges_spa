@@ -215,10 +215,10 @@
                     @php
                         $ingresos = App\Models\IngresoDetalle::select('ingreso_detalles.*')
                             ->join('ingresos', 'ingresos.id', '=', 'ingreso_detalles.ingreso_id')
-                            ->where('ingresos.donacion', 'SI');
+                            ->where('ingresos.donacion', 'NO');
                         $ingresos->where('ingresos.almacen_id', $almacen->id);
                         if ($fecha_ini && $fecha_fin) {
-                            $ingresos->whereBetween('fecha_registro', [$fecha_ini, $fecha_fin]);
+                            $ingresos->whereBetween('fecha_ingreso', [$fecha_ini, $fecha_fin]);
                         }
                         $ingresos->where('ingreso_detalles.partida_id', $partida->id);
                         // EXTERNO

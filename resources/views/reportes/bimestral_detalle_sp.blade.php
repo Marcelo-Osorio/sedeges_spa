@@ -237,12 +237,12 @@
                     @foreach ($pdata['filas'] as $f)
                         <tr>
                             <td>{{ $cont++ }}</td>
-                            <td>{{ $f->codigo }}</td>
+                            <td>{{ $f->item_abreviatura }}</td>
                             <td>{{ $f->unidad_medida_nombre }}</td>
                             <td>{{ $f->item_nombre }}</td>
                             {{-- Saldo anterior: cantidad, costo, total --}}
                             <td class="centreado bg4">{{ $f->saldo_anterior_cantidad }}</td>
-                            <td class="centreado bg4">{{ $f->ingreso_rango_costo }}</td>
+                            <td class="centreado bg4">{{ $f->saldo_anterior_costo }}</td>
                             <td class="centreado bg4">{{ number_format($f->saldo_anterior_total, 2, '.', '') }}</td>
                             {{-- Fecha ingreso --}}
                             <td class="centreado">{{ $f->fecha_ingreso }}</td>

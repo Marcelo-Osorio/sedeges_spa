@@ -11,7 +11,7 @@ return new class extends Migration
         Schema::create('egresos', function (Blueprint $table) {
             $table->id();
             $table->unsignedBigInteger("ingreso_id")->nullable();
-            $table->unsignedBigInteger("ingreso_detalle_id");
+            $table->unsignedBigInteger("ingreso_detalle_id")->unique();
             $table->unsignedBigInteger("almacen_id");
             $table->unsignedBigInteger("partida_id")->nullable();
             $table->unsignedBigInteger("item_id");

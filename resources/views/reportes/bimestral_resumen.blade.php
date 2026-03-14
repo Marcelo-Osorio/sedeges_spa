@@ -215,7 +215,7 @@
                     @php
                         $ingresos = App\Models\IngresoDetalle::select('ingreso_detalles.*')
                             ->join('ingresos', 'ingresos.id', '=', 'ingreso_detalles.ingreso_id')
-                            ->where('ingresos.donacion', 'NO');
+                            ->where('ingresos.donacion', 'SI');
                         $ingresos->where('ingresos.almacen_id', $almacen->id);
                         if ($fecha_ini && $fecha_fin) {
                             $ingresos->whereBetween('fecha_ingreso', [$fecha_ini, $fecha_fin]);

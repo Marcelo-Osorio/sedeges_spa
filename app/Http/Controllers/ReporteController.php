@@ -169,6 +169,7 @@ class ReporteController extends Controller
         $fecha_fin  = $request->fecha_fin;
         $formato    = $request->formato;
         $tipo       = $request->tipo;
+        $donacion   = in_array($request->donacion, ['SI', 'NO']) ? $request->donacion : 'NO';
 
         // Obtener almacenes permitidos
         $almacensQ = Almacen::select("almacens.*");
@@ -186,8 +187,7 @@ class ReporteController extends Controller
 
         // ── DETALLE: usar stored procedure ──────────────────────────────────
         if ($formato == 'detalle') {
-            $reporte = $this->buildBimestralReporteData($almacens, $fecha_ini, $fecha_fin);
-
+            $reporte = $this->buildBimestralReporteData($almacens, $fecha_ini, $fecha_fin, $donacion);
             if ($tipo == 'pdf') {
                 $pdf = PDF::loadView(
                     'reportes.bimestral_detalle_sp',
@@ -208,7 +208,7 @@ class ReporteController extends Controller
         }
 
         // ── RESUMEN: SP sp_reporte_resumen por almacén, agrupado por partida ──
-        $reporteResumen = $this->buildBimestralResumenReporteData($almacens, $fecha_ini, $fecha_fin);
+        $reporteResumen = $this->buildBimestralResumenReporteData($almacens, $fecha_ini, $fecha_fin, $donacion);
 
         if ($tipo == 'pdf') {
             $pdf = PDF::loadView(
@@ -237,7 +237,7 @@ class ReporteController extends Controller
      * los resultados en memoria con la estructura:
      * [ ['almacen'=>…, 'partidas'=>[ ['partida'=>…,'filas'=>[…],'subtotal'=>[…]] ], 'totales'=>[…]] ]
      */
-    private function buildBimestralReporteData($almacens, $fecha_ini, $fecha_fin): array
+    private function buildBimestralReporteData($almacens, $fecha_ini, $fecha_fin, $donacion = 'NO'): array
     {
         $user   = Auth::user();
         $result = [];
@@ -246,7 +246,7 @@ class ReporteController extends Controller
             // Una sola llamada al SP por almacén
             $filas = \Illuminate\Support\Facades\DB::select(
                 'CALL sp_reporte_detalle(?, ?, ?, ?, ?)',
-                [$fecha_ini, $fecha_fin, 'NO', 'CENTROS', $almacen->id]
+                [$fecha_ini, $fecha_fin, $donacion, 'CENTROS', $almacen->id]
             );
 
             // Filtro EXTERNO en memoria (el SP ya filtra por almacen_id,
@@ -486,7 +486,7 @@ class ReporteController extends Controller
      * agrupa por partida (suma ingresos, egresos, saldo) y devuelve todas las partidas
      * (las vacías con 0). Estructura: ['partidas' => [...], 'totales' => [...]]
      */
-    private function buildBimestralResumenReporteData($almacens, $fecha_ini, $fecha_fin): array
+    private function buildBimestralResumenReporteData($almacens, $fecha_ini, $fecha_fin, $donacion = 'NO'): array
     {
         $user = Auth::user();
         $partidasOrden = Partida::orderBy('nro_partida')->get();
@@ -498,7 +498,7 @@ class ReporteController extends Controller
                 [
                     $fecha_ini,
                     $fecha_fin,
-                    'NO',
+                    $donacion,
                     'CENTROS',
                     $almacen->id,
                     $user->tipo ?? '',
@@ -630,6 +630,363 @@ class ReporteController extends Controller
         $writer->save('php://output');
     }
 
+    /**
+     * Cuatrimestral detalle: mismo que buildBimestralReporteData pero usa $almacen->grupo en cada llamada al SP.
+     */
+    private function buildCuatrimestralReporteData($almacens, $fecha_ini, $fecha_fin, $donacion = 'NO'): array
+    {
+        $user   = Auth::user();
+        $result = [];
+
+        foreach ($almacens as $almacen) {
+            $filas = \Illuminate\Support\Facades\DB::select(
+                'CALL sp_reporte_detalle(?, ?, ?, ?, ?)',
+                [$fecha_ini, $fecha_fin, $donacion, $almacen->grupo, $almacen->id]
+            );
+
+            if ($user->tipo == 'EXTERNO') {
+                $filas = array_filter($filas, fn($f) =>
+                    $f->unidad_id == $user->unidad_id && $f->user_id == $user->id
+                );
+                $filas = array_values($filas);
+            }
+
+            if (empty($filas)) {
+                continue;
+            }
+
+            $tot = ['saldo_ant_cant' => 0, 'saldo_ant_total' => 0,
+                    'ingreso_cant'   => 0, 'ingreso_total'   => 0,
+                    'egreso_cant'    => 0, 'egreso_total'    => 0,
+                    'saldo_fin_cant' => 0, 'saldo_fin_total' => 0];
+
+            $grouped = [];
+            foreach ($filas as $fila) {
+                $pid = $fila->partida_id ?? 'sin_partida';
+                $grouped[$pid]['meta']    = [
+                    'id'          => $fila->partida_id,
+                    'nro_partida' => $fila->nro_partida,
+                    'nombre'      => $fila->partida_nombre,
+                ];
+                $grouped[$pid]['filas'][] = $fila;
+            }
+
+            $partidas_data = [];
+            foreach ($grouped as $pid => $gdata) {
+                $sub = ['saldo_ant_cant' => 0, 'saldo_ant_total' => 0,
+                        'ingreso_cant'   => 0, 'ingreso_total'   => 0,
+                        'egreso_cant'    => 0, 'egreso_total'    => 0,
+                        'saldo_fin_cant' => 0, 'saldo_fin_total' => 0];
+
+                foreach ($gdata['filas'] as $f) {
+                    $sub['saldo_ant_cant']  += (float) $f->saldo_anterior_cantidad;
+                    $sub['saldo_ant_total'] += (float) $f->saldo_anterior_total;
+                    $sub['ingreso_cant']    += (float) $f->ingreso_rango_cantidad;
+                    $sub['ingreso_total']   += (float) $f->ingreso_rango_total;
+                    $sub['egreso_cant']     += (float) $f->egreso_rango_cantidad;
+                    $sub['egreso_total']    += (float) $f->egreso_rango_total;
+                    $sub['saldo_fin_cant']  += (float) $f->saldo_final_cantidad;
+                    $sub['saldo_fin_total'] += (float) $f->saldo_final_total;
+                }
+                foreach ($sub as $k => $v) {
+                    $tot[$k] += $v;
+                }
+                $partidas_data[] = [
+                    'partida'  => $gdata['meta'],
+                    'filas'    => $gdata['filas'],
+                    'subtotal' => $sub,
+                ];
+            }
+
+            $result[] = [
+                'almacen'  => ['id' => $almacen->id, 'nombre' => $almacen->nombre],
+                'partidas' => $partidas_data,
+                'totales'  => $tot,
+            ];
+        }
+
+        return $result;
+    }
+
+    /**
+     * Cuatrimestral resumen: mismo que buildBimestralResumenReporteData pero usa $almacen->grupo en cada llamada al SP.
+     */
+    private function buildCuatrimestralResumenReporteData($almacens, $fecha_ini, $fecha_fin, $donacion = 'NO'): array
+    {
+        $user = Auth::user();
+        $partidasOrden = Partida::orderBy('nro_partida')->get();
+        $agregado = [];
+
+        foreach ($almacens as $almacen) {
+            $filas = \Illuminate\Support\Facades\DB::select(
+                'CALL sp_reporte_resumen(?, ?, ?, ?, ?, ?, ?, ?)',
+                [
+                    $fecha_ini,
+                    $fecha_fin,
+                    $donacion,
+                    $almacen->grupo,
+                    $almacen->id,
+                    $user->tipo ?? '',
+                    $user->unidad_id ?? 0,
+                    $user->id ?? 0,
+                ]
+            );
+            foreach ($filas as $fila) {
+                $pid = $fila->partida_id;
+                if (!isset($agregado[$pid])) {
+                    $agregado[$pid] = ['ingresos' => 0, 'egresos' => 0, 'saldo' => 0];
+                }
+                $agregado[$pid]['ingresos'] += (float) $fila->ingresos;
+                $agregado[$pid]['egresos'] += (float) $fila->egresos;
+                $agregado[$pid]['saldo'] += (float) $fila->saldo;
+            }
+        }
+
+        $partidas = [];
+        $totales = ['ingresos' => 0, 'egresos' => 0, 'saldo' => 0];
+        foreach ($partidasOrden as $partida) {
+            $pid = $partida->id;
+            $ing = $agregado[$pid]['ingresos'] ?? 0;
+            $egr = $agregado[$pid]['egresos'] ?? 0;
+            $sal = $agregado[$pid]['saldo'] ?? 0;
+            $partidas[] = [
+                'partida' => [
+                    'id' => $partida->id,
+                    'nro_partida' => $partida->nro_partida,
+                    'nombre' => $partida->nombre,
+                ],
+                'ingresos' => $ing,
+                'egresos' => $egr,
+                'saldo' => $sal,
+            ];
+            $totales['ingresos'] += $ing;
+            $totales['egresos'] += $egr;
+            $totales['saldo'] += $sal;
+        }
+
+        return ['partidas' => $partidas, 'totales' => $totales];
+    }
+
+    /**
+     * Excel cuatrimestral detalle (datos precalculados por SP).
+     */
+    private function r_cuatrimestral_detalle_excel(array $reporte, $fecha_ini, $fecha_fin, $texto_fecha)
+    {
+        $configuracion = \App\Models\Configuracion::first();
+        $tituloReporte = 'INVENTARIO FÍSICO VALORADO DE BIENES Y CONSUMO';
+        $spreadsheet = new Spreadsheet();
+        $spreadsheet->getProperties()
+            ->setCreator("ADMIN")->setLastModifiedBy('Administración')
+            ->setTitle('Cuatrimestral Detalle')->setSubject('Cuatrimestral Detalle')
+            ->setDescription('Cuatrimestral Detalle')->setKeywords('PHPSpreadsheet')
+            ->setCategory('Listado');
+        $sheet = $spreadsheet->getActiveSheet();
+        $spreadsheet->getDefaultStyle()->getFont()->setName('Arial');
+
+        $fila = 1;
+        if (file_exists(public_path() . '/imgs/' . $configuracion->logo)) {
+            $drawing = new \PhpOffice\PhpSpreadsheet\Worksheet\Drawing();
+            $drawing->setName('logo')->setDescription('logo');
+            $drawing->setPath(public_path() . '/imgs/' . $configuracion->logo);
+            $drawing->setCoordinates('A1')->setOffsetX(5)->setOffsetY(0)->setHeight(60);
+            $drawing->setWorksheet($sheet);
+        }
+        $fila = 2;
+
+        $txt_sd = $fecha_ini ? 'SALDO AL ' . date('d/m/Y', strtotime($fecha_ini)) : 'SALDO ANTERIOR';
+        $txt_sf = $fecha_fin ? 'SALDO AL ' . date('d/m/Y', strtotime($fecha_fin)) : 'SALDO';
+
+        foreach ($reporte as $bloque) {
+            foreach ([
+                $configuracion->razon_social,
+                $tituloReporte,
+                $bloque['almacen']['nombre'],
+                $texto_fecha,
+            ] as $txt) {
+                $sheet->setCellValue('A' . $fila, $txt);
+                $sheet->mergeCells("A{$fila}:Q{$fila}");
+                $sheet->getStyle("A{$fila}:Q{$fila}")->getAlignment()->setHorizontal('center');
+                $sheet->getStyle("A{$fila}:Q{$fila}")->applyFromArray($this->titulo);
+                $fila++;
+            }
+            $fila++; $fila++;
+
+            $sheet->setCellValue('A' . $fila, 'N°');     $sheet->mergeCells("A{$fila}:A" . ($fila+1));
+            $sheet->setCellValue('B' . $fila, 'CÓDIGO'); $sheet->mergeCells("B{$fila}:B" . ($fila+1));
+            $sheet->setCellValue('C' . $fila, 'UNIDAD'); $sheet->mergeCells("C{$fila}:C" . ($fila+1));
+            $sheet->setCellValue('D' . $fila, 'DESCRIPCIÓN'); $sheet->mergeCells("D{$fila}:D" . ($fila+1));
+            $sheet->setCellValue('E' . $fila, $txt_sd);  $sheet->mergeCells("E{$fila}:G{$fila}");
+            $sheet->setCellValue('H' . $fila, 'FECHA INGRESO'); $sheet->mergeCells("H{$fila}:H" . ($fila+1));
+            $sheet->setCellValue('I' . $fila, 'INGRESO ALMACENES'); $sheet->mergeCells("I{$fila}:K{$fila}");
+            $sheet->setCellValue('L' . $fila, 'SALIDA ALMACENES'); $sheet->mergeCells("L{$fila}:N{$fila}");
+            $sheet->setCellValue('O' . $fila, $txt_sf);  $sheet->mergeCells("O{$fila}:Q{$fila}");
+            $sheet->getStyle("A{$fila}:Q{$fila}")->applyFromArray($this->headerTabla);
+            $fila++;
+            foreach (['E'=>'CANT.','F'=>'C/U','G'=>'TOTAL BS.','I'=>'CANT.','J'=>'C/U','K'=>'TOTAL BS.','L'=>'CANT.','M'=>'C/U','N'=>'TOTAL BS.','O'=>'CANT.','P'=>'C/U','Q'=>'TOTAL BS.'] as $col => $lbl) {
+                $sheet->setCellValue($col . $fila, $lbl);
+            }
+            $sheet->getStyle("E{$fila}:Q{$fila}")->applyFromArray($this->headerTabla);
+            $fila++;
+
+            $cont = 1;
+            foreach ($bloque['partidas'] as $pdata) {
+                $sheet->setCellValue('A' . $fila, 'PARTIDA N° ' . $pdata['partida']['nro_partida']);
+                $sheet->mergeCells("A{$fila}:D{$fila}");
+                $sheet->getStyle("A{$fila}:Q{$fila}")->applyFromArray($this->bg1);
+                $sheet->getStyle("A{$fila}:Q{$fila}")->applyFromArray($this->bodyTabla);
+                $fila++;
+                foreach ($pdata['filas'] as $f) {
+                    $sheet->setCellValue('A' . $fila, $cont++);
+                    $sheet->setCellValue('B' . $fila, $f->item_abreviatura);
+                    $sheet->setCellValue('C' . $fila, $f->unidad_medida_nombre);
+                    $sheet->setCellValue('D' . $fila, $f->item_nombre);
+                    $sheet->setCellValue('E' . $fila, $f->saldo_anterior_cantidad);
+                    $sheet->setCellValue('F' . $fila, $f->saldo_anterior_costo);
+                    $sheet->setCellValue('G' . $fila, $f->saldo_anterior_total);
+                    $sheet->setCellValue('H' . $fila, $f->fecha_ingreso);
+                    $sheet->setCellValue('I' . $fila, $f->ingreso_rango_cantidad);
+                    $sheet->setCellValue('J' . $fila, $f->ingreso_rango_costo);
+                    $sheet->setCellValue('K' . $fila, $f->ingreso_rango_total);
+                    $sheet->setCellValue('L' . $fila, $f->egreso_rango_cantidad);
+                    $sheet->setCellValue('M' . $fila, $f->egreso_rango_costo);
+                    $sheet->setCellValue('N' . $fila, $f->egreso_rango_total);
+                    $sheet->setCellValue('O' . $fila, $f->saldo_final_cantidad);
+                    $sheet->setCellValue('P' . $fila, $f->saldo_final_costo);
+                    $sheet->setCellValue('Q' . $fila, $f->saldo_final_total);
+                    $sheet->getStyle("A{$fila}:Q{$fila}")->applyFromArray($this->bodyTabla);
+                    $sheet->getStyle("E{$fila}:Q{$fila}")->applyFromArray($this->celdaCenter);
+                    $fila++;
+                }
+                $sub = $pdata['subtotal'];
+                $sheet->setCellValue('A' . $fila, 'TOTAL PARTIDA N° ' . $pdata['partida']['nro_partida']);
+                $sheet->mergeCells("A{$fila}:D{$fila}");
+                $sheet->setCellValue('E' . $fila, number_format($sub['saldo_ant_cant'],  2, '.', ''));
+                $sheet->setCellValue('G' . $fila, number_format($sub['saldo_ant_total'], 2, '.', ''));
+                $sheet->setCellValue('I' . $fila, number_format($sub['ingreso_cant'],    2, '.', ''));
+                $sheet->setCellValue('K' . $fila, number_format($sub['ingreso_total'],   2, '.', ''));
+                $sheet->setCellValue('L' . $fila, number_format($sub['egreso_cant'],     2, '.', ''));
+                $sheet->setCellValue('N' . $fila, number_format($sub['egreso_total'],    2, '.', ''));
+                $sheet->setCellValue('O' . $fila, number_format($sub['saldo_fin_cant'],  2, '.', ''));
+                $sheet->setCellValue('Q' . $fila, number_format($sub['saldo_fin_total'], 2, '.', ''));
+                $sheet->getStyle("A{$fila}:Q{$fila}")->applyFromArray($this->footerTabla);
+                $fila++;
+            }
+            $tot = $bloque['totales'];
+            $sheet->setCellValue('A' . $fila, 'TOTAL GENERAL');
+            $sheet->mergeCells("A{$fila}:D{$fila}");
+            $sheet->setCellValue('E' . $fila, number_format($tot['saldo_ant_cant'],  2, '.', ''));
+            $sheet->setCellValue('G' . $fila, number_format($tot['saldo_ant_total'], 2, '.', ''));
+            $sheet->setCellValue('I' . $fila, number_format($tot['ingreso_cant'],    2, '.', ''));
+            $sheet->setCellValue('K' . $fila, number_format($tot['ingreso_total'],   2, '.', ''));
+            $sheet->setCellValue('L' . $fila, number_format($tot['egreso_cant'],     2, '.', ''));
+            $sheet->setCellValue('N' . $fila, number_format($tot['egreso_total'],    2, '.', ''));
+            $sheet->setCellValue('O' . $fila, number_format($tot['saldo_fin_cant'],  2, '.', ''));
+            $sheet->setCellValue('Q' . $fila, number_format($tot['saldo_fin_total'], 2, '.', ''));
+            $sheet->getStyle("A{$fila}:Q{$fila}")->applyFromArray($this->footerTabla);
+            $fila++; $fila++; $fila++; $fila++;
+        }
+
+        $sheet->getColumnDimension('A')->setWidth(6);
+        $sheet->getColumnDimension('B')->setWidth(20);
+        $sheet->getColumnDimension('C')->setWidth(12);
+        $sheet->getColumnDimension('D')->setWidth(30);
+        foreach (range('E', 'Q') as $col) {
+            $sheet->getColumnDimension($col)->setWidth(12);
+        }
+        foreach (range('A', 'Q') as $col) {
+            $sheet->getStyle($col)->getAlignment()->setWrapText(true);
+        }
+        $sheet->getPageSetup()->setOrientation(\PhpOffice\PhpSpreadsheet\Worksheet\PageSetup::ORIENTATION_LANDSCAPE);
+        $sheet->getPageMargins()->setTop(0.5)->setRight(0.1)->setLeft(0.1)->setBottom(0.1);
+        $sheet->getPageSetup()->setPrintArea('A:Q')->setFitToWidth(1)->setFitToHeight(0);
+        header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        header('Content-Disposition: attachment;filename="cuatrimestral_detalle.xlsx"');
+        header('Cache-Control: max-age=0');
+        $writer = IOFactory::createWriter($spreadsheet, 'Xlsx');
+        $writer->save('php://output');
+    }
+
+    /**
+     * Excel cuatrimestral resumen (datos precalculados por SP).
+     */
+    private function r_cuatrimestral_resumen_excel(array $reporteResumen, $texto_fecha)
+    {
+        $configuracion = \App\Models\Configuracion::first();
+        $spreadsheet = new Spreadsheet();
+        $spreadsheet->getProperties()
+            ->setCreator("ADMIN")->setLastModifiedBy('Administración')
+            ->setTitle('Cuatrimestral Resumen')->setSubject('Cuatrimestral Resumen')
+            ->setDescription('Cuatrimestral Resumen')->setKeywords('PHPSpreadsheet')
+            ->setCategory('Listado');
+        $sheet = $spreadsheet->getActiveSheet();
+        $spreadsheet->getDefaultStyle()->getFont()->setName('Arial');
+
+        $fila = 1;
+        if (file_exists(public_path() . '/imgs/' . $configuracion->logo)) {
+            $drawing = new \PhpOffice\PhpSpreadsheet\Worksheet\Drawing();
+            $drawing->setName('logo')->setDescription('logo');
+            $drawing->setPath(public_path() . '/imgs/' . $configuracion->logo);
+            $drawing->setCoordinates('A' . $fila)->setOffsetX(5)->setOffsetY(0)->setHeight(60);
+            $drawing->setWorksheet($sheet);
+        }
+        $fila = 2;
+        $sheet->setCellValue('A' . $fila, $configuracion->razon_social);
+        $sheet->mergeCells("A{$fila}:E{$fila}");
+        $sheet->getStyle("A{$fila}:E{$fila}")->getAlignment()->setHorizontal('center');
+        $sheet->getStyle("A{$fila}:E{$fila}")->applyFromArray($this->titulo);
+        $fila++;
+        $sheet->setCellValue('A' . $fila, "INVENTARIO FÍSICO VALORADO DE BIENES Y CONSUMO");
+        $sheet->mergeCells("A{$fila}:E{$fila}");
+        $sheet->getStyle("A{$fila}:E{$fila}")->getAlignment()->setHorizontal('center');
+        $sheet->getStyle("A{$fila}:E{$fila}")->applyFromArray($this->titulo);
+        $fila++;
+        $sheet->setCellValue('A' . $fila, $texto_fecha);
+        $sheet->mergeCells("A{$fila}:E{$fila}");
+        $sheet->getStyle("A{$fila}:E{$fila}")->getAlignment()->setHorizontal('center');
+        $sheet->getStyle("A{$fila}:E{$fila}")->applyFromArray($this->titulo);
+        $fila++; $fila++;
+        $sheet->setCellValue('A' . $fila, 'PARTIDA');
+        $sheet->setCellValue('B' . $fila, 'DESCRIPCIÓN');
+        $sheet->setCellValue('C' . $fila, 'INGRESOS');
+        $sheet->setCellValue('D' . $fila, 'SALIDAS');
+        $sheet->setCellValue('E' . $fila, 'SALDOS');
+        $sheet->getStyle("A{$fila}:E{$fila}")->applyFromArray($this->headerTabla);
+        $fila++;
+        foreach ($reporteResumen['partidas'] as $item) {
+            $sheet->setCellValue('A' . $fila, $item['partida']['nro_partida']);
+            $sheet->setCellValue('B' . $fila, $item['partida']['nombre']);
+            $sheet->setCellValue('C' . $fila, $item['ingresos']);
+            $sheet->setCellValue('D' . $fila, $item['egresos']);
+            $sheet->setCellValue('E' . $fila, $item['saldo']);
+            $sheet->getStyle("A{$fila}:E{$fila}")->applyFromArray($this->bodyTabla);
+            $sheet->getStyle("A{$fila}:E{$fila}")->applyFromArray($this->celdaCenter);
+            $fila++;
+        }
+        $tot = $reporteResumen['totales'];
+        $sheet->setCellValue('A' . $fila, 'TOTALES');
+        $sheet->mergeCells("A{$fila}:B{$fila}");
+        $sheet->setCellValue('C' . $fila, number_format($tot['ingresos'], 2, ".", ""));
+        $sheet->setCellValue('D' . $fila, number_format($tot['egresos'], 2, ".", ""));
+        $sheet->setCellValue('E' . $fila, number_format($tot['saldo'], 2, ".", ""));
+        $sheet->getStyle("A{$fila}:E{$fila}")->applyFromArray($this->footerTabla);
+        $sheet->getColumnDimension('A')->setWidth(15);
+        $sheet->getColumnDimension('B')->setWidth(23);
+        $sheet->getColumnDimension('C')->setWidth(15);
+        $sheet->getColumnDimension('D')->setWidth(15);
+        $sheet->getColumnDimension('E')->setWidth(15);
+        foreach (range('A', 'K') as $columnID) {
+            $sheet->getStyle($columnID)->getAlignment()->setWrapText(true);
+        }
+        $sheet->getPageSetup()->setOrientation(\PhpOffice\PhpSpreadsheet\Worksheet\PageSetup::ORIENTATION_LANDSCAPE);
+        $sheet->getPageMargins()->setTop(0.5)->setRight(0.1)->setLeft(0.1)->setBottom(0.1);
+        $sheet->getPageSetup()->setPrintArea('A:E')->setFitToWidth(1)->setFitToHeight(0);
+        header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        header('Content-Disposition: attachment;filename="cuatrimestral_resumen.xlsx"');
+        header('Cache-Control: max-age=0');
+        $writer = IOFactory::createWriter($spreadsheet, 'Xlsx');
+        $writer->save('php://output');
+    }
+
     // ── Fin de métodos SP ─────────────────────────────────────────────────────
 
     public function cuatrimestral()
@@ -645,8 +1002,8 @@ class ReporteController extends Controller
         $fecha_fin = $request->fecha_fin;
         $formato = $request->formato;
         $tipo = $request->tipo;
+        $donacion = in_array($request->donacion, ['SI', 'NO']) ? $request->donacion : 'NO';
 
-        $partidas = Partida::all();
         $almacens = Almacen::select("almacens.*");
 
         if ($almacen_id != 'todos') {
@@ -659,437 +1016,36 @@ class ReporteController extends Controller
         $almacens->whereIn("grupo", $a_grupos);
 
         $texto_fecha = ReporteController::getFechaTexto($fecha_ini, $fecha_fin);
-
         $almacens = $almacens->get();
+        $configuracion = \App\Models\Configuracion::first();
+
+        if ($formato == 'detalle') {
+            $reporte = $this->buildCuatrimestralReporteData($almacens, $fecha_ini, $fecha_fin, $donacion);
+            if ($tipo == 'pdf') {
+                $pdf = PDF::loadView('reportes.cuatrimestral_detalle_sp', compact('reporte', 'fecha_ini', 'fecha_fin', 'texto_fecha', 'configuracion'))->setPaper('letter', 'landscape');
+                $pdf->output();
+                $dom_pdf = $pdf->getDomPDF();
+                $canvas = $dom_pdf->get_canvas();
+                $alto = $canvas->get_height();
+                $ancho = $canvas->get_width();
+                $canvas->page_text($ancho - 90, $alto - 25, "Página {PAGE_NUM} de {PAGE_COUNT}", null, 9, [0, 0, 0]);
+                return $pdf->stream('cuatrimestral_detalle.pdf');
+            }
+            return $this->r_cuatrimestral_detalle_excel($reporte, $fecha_ini, $fecha_fin, $texto_fecha);
+        }
+
+        $reporteResumen = $this->buildCuatrimestralResumenReporteData($almacens, $fecha_ini, $fecha_fin, $donacion);
         if ($tipo == 'pdf') {
-            $archivo = "reportes.cuatrimestral_" . $formato;
-            $orientacion = $formato == 'detalle' ? 'landscape' : 'portrait';
-
-            $pdf = PDF::loadView($archivo, compact('partidas', 'almacens', 'fecha_ini', 'fecha_fin', 'texto_fecha'))->setPaper('letter', $orientacion);
-
-            // ENUMERAR LAS PÁGINAS USANDO CANVAS
+            $pdf = PDF::loadView('reportes.cuatrimestral_resumen_sp', compact('reporteResumen', 'texto_fecha', 'configuracion'))->setPaper('letter', 'portrait');
             $pdf->output();
             $dom_pdf = $pdf->getDomPDF();
             $canvas = $dom_pdf->get_canvas();
             $alto = $canvas->get_height();
             $ancho = $canvas->get_width();
-            $canvas->page_text($ancho - 90, $alto - 25, "Página {PAGE_NUM} de {PAGE_COUNT}", null, 9, array(0, 0, 0));
-
-            return $pdf->stream('cuatrimestral_detalle.pdf');
-        } else {
-            // EXCEL
-
-            $spreadsheet = new Spreadsheet();
-            $spreadsheet->getProperties()
-                ->setCreator("ADMIN")
-                ->setLastModifiedBy('Administración')
-                ->setTitle('Formularios')
-                ->setSubject('Formularios')
-                ->setDescription('Formularios')
-                ->setKeywords('PHPSpreadsheet')
-                ->setCategory('Listado');
-
-            $sheet = $spreadsheet->getActiveSheet();
-
-            $spreadsheet->getDefaultStyle()->getFont()->setName('Arial');
-
-            $fila = 1;
-            if (file_exists(public_path() . '/imgs/' . Configuracion::first()->logo)) {
-                $drawing = new \PhpOffice\PhpSpreadsheet\Worksheet\Drawing();
-                $drawing->setName('logo');
-                $drawing->setDescription('logo');
-                $drawing->setPath(public_path() . '/imgs/' . Configuracion::first()->logo); // put your path and image here
-                $drawing->setCoordinates('A' . $fila);
-                $drawing->setOffsetX(5);
-                $drawing->setOffsetY(0);
-                $drawing->setHeight(60);
-                $drawing->setWorksheet($sheet);
-            }
-
-            $fila = 2;
-
-            if ($formato == "detalle") {
-                // DETALLE
-                foreach ($almacens as $almacen) {
-                    $sheet->setCellValue('A' . $fila, Configuracion::first()->razon_social);
-                    $sheet->mergeCells("A" . $fila . ":Q" . $fila);  //COMBINAR CELDAS
-                    $sheet->getStyle('A' . $fila . ':Q' . $fila)->getAlignment()->setHorizontal('center');
-                    $sheet->getStyle('A' . $fila . ':Q' . $fila)->applyFromArray($this->titulo);
-                    $fila++;
-                    $sheet->setCellValue('A' . $fila, "INVENTARIO FÍSICO VALORADO DE BIENES Y CONSUMO");
-                    $sheet->mergeCells("A" . $fila . ":Q" . $fila);  //COMBINAR CELDAS
-                    $sheet->getStyle('A' . $fila . ':Q' . $fila)->getAlignment()->setHorizontal('center');
-                    $sheet->getStyle('A' . $fila . ':Q' . $fila)->applyFromArray($this->titulo);
-                    $fila++;
-                    $sheet->setCellValue('A' . $fila, $almacen->nombre);
-                    $sheet->mergeCells("A" . $fila . ":Q" . $fila);  //COMBINAR CELDAS
-                    $sheet->getStyle('A' . $fila . ':Q' . $fila)->getAlignment()->setHorizontal('center');
-                    $sheet->getStyle('A' . $fila . ':Q' . $fila)->applyFromArray($this->titulo);
-                    $fila++;
-                    $sheet->setCellValue('A' . $fila, $texto_fecha);
-                    $sheet->mergeCells("A" . $fila . ":Q" . $fila);  //COMBINAR CELDAS
-                    $sheet->getStyle('A' . $fila . ':Q' . $fila)->getAlignment()->setHorizontal('center');
-                    $sheet->getStyle('A' . $fila . ':Q' . $fila)->applyFromArray($this->titulo);
-                    $fila++;
-                    $fila++;
-                    $fila++;
-                    $sheet->setCellValue('A' . $fila, 'N°');
-                    $sheet->mergeCells("A" . $fila . ":A" . $fila + 1);  //COMBINAR CELDAS
-                    $sheet->setCellValue('B' . $fila, 'CÓDIGO');
-                    $sheet->mergeCells("B" . $fila . ":B" . $fila + 1);  //COMBINAR CELDAS
-                    $sheet->setCellValue('C' . $fila, 'UNIDAD');
-                    $sheet->mergeCells("C" . $fila . ":C" . $fila + 1);  //COMBINAR CELDAS
-                    $sheet->setCellValue('D' . $fila, 'DESCRIPCIÓN');
-                    $sheet->mergeCells("D" . $fila . ":D" . $fila + 1);  //COMBINAR CELDAS
-                    $txt_saldo_anterior = $fecha_ini ? 'SALDO AL ' . date('d/m/Y', strtotime($fecha_ini)) : 'SALDO ANTERIOR';
-                    $sheet->setCellValue('E' . $fila, $txt_saldo_anterior);
-                    $sheet->mergeCells("E" . $fila . ":G" . $fila);  //COMBINAR CELDAS
-                    $sheet->setCellValue('H' . $fila, 'FECHA INGRESO');
-                    $sheet->mergeCells("H" . $fila . ":H" . $fila + 1);  //COMBINAR CELDAS
-                    $sheet->setCellValue('I' . $fila, 'INGRESO ALMACENES');
-                    $sheet->mergeCells("I" . $fila . ":K" . $fila);  //COMBINAR CELDAS
-                    $sheet->setCellValue('L' . $fila, 'SALIDA ALMACENES');
-                    $sheet->mergeCells("L" . $fila . ":N" . $fila);  //COMBINAR CELDAS
-                    $txt_saldo_anterior = $fecha_fin ? 'SALDO AL ' . date('d/m/Y', strtotime($fecha_fin)) : 'SALDO';
-                    $sheet->setCellValue('O' . $fila, 'SALDO AL ' . $txt_saldo_anterior);
-                    $sheet->mergeCells("O" . $fila . ":Q" . $fila);  //COMBINAR CELDAS
-                    $sheet->getStyle('A' . $fila . ':Q' . $fila)->applyFromArray($this->headerTabla);
-                    $fila++;
-
-                    $sheet->setCellValue('E' . $fila, 'CANT.');
-                    $sheet->setCellValue('F' . $fila, 'C/U');
-                    $sheet->setCellValue('G' . $fila, 'TOTAL BS.');
-                    $sheet->setCellValue('I' . $fila, 'CANT.');
-                    $sheet->setCellValue('J' . $fila, 'C/U');
-                    $sheet->setCellValue('K' . $fila, 'TOTAL BS.');
-                    $sheet->setCellValue('L' . $fila, 'CANT.');
-                    $sheet->setCellValue('M' . $fila, 'C/U');
-                    $sheet->setCellValue('N' . $fila, 'TOTAL BS.');
-                    $sheet->setCellValue('O' . $fila, 'CANT.');
-                    $sheet->setCellValue('P' . $fila, 'C/U');
-                    $sheet->setCellValue('Q' . $fila, 'TOTAL BS.');
-                    $sheet->getStyle('E' . $fila . ':Q' . $fila)->applyFromArray($this->headerTabla);
-                    $fila++;
-                    $total1 = 0;
-                    $total2 = 0;
-                    $total3 = 0;
-                    $total4 = 0;
-                    $cont = 1;
-                    foreach ($partidas as $partida) {
-                        $totalp1 = 0;
-                        $totalp2 = 0;
-                        $totalp3 = 0;
-                        $totalp4 = 0;
-
-                        $ingresos = IngresoDetalle::select("ingreso_detalles.*")
-                            ->join("ingresos", "ingresos.id", "=", "ingreso_detalles.ingreso_id")->where('ingresos.donacion', 'NO');
-                        $ingresos->where('ingresos.almacen_id', $almacen->id);
-                        if ($fecha_ini && $fecha_fin) {
-                            $ingresos->whereBetween('fecha_registro', [$fecha_ini, $fecha_fin]);
-                        }
-
-                        // EXTERNO
-                        $user = Auth::user();
-                        if ($user->tipo == 'EXTERNO') {
-                            $ingresos->where('ingresos.unidad_id', $user->unidad_id);
-                            $ingresos->where('ingresos.user_id', $user->id);
-                        }
-
-                        $ingresos->where('partida_id', $partida->id);
-                        $ingresos = $ingresos->get();
-
-                        // VERIFICAR SALDOS ANTERIORES
-                        $saldo = 0;
-                        $reg_ingresos = [];
-                        if ($fecha_ini && $fecha_fin) {
-                            $reg_ingresos = IngresoDetalle::select("ingreso_detalles.*")
-                                ->join("ingresos", "ingresos.id", "=", "ingreso_detalles.ingreso_id")->where('ingresos.donacion', 'NO');
-                            $reg_ingresos->where('ingresos.almacen_id', $almacen->id);
-                            $reg_ingresos->where('fecha_registro', '<', $fecha_ini);
-                            $reg_ingresos->where('partida_id', $partida->id);
-                            $reg_ingresos = $reg_ingresos->get();
-                        }
-
-                        if (count($ingresos) > 0 || count($reg_ingresos) > 0) {
-                            $sheet->setCellValue('A' . $fila, 'PARTIDA N° ' . $partida->nro_partida);
-                            $sheet->getStyle('A' . $fila . ':C' . $fila)->applyFromArray($this->bg1);
-                            $sheet->mergeCells("A" . $fila . ":C" . $fila);  //COMBINAR CELDAS
-                            $sheet->getStyle('A' . $fila . ':C' . $fila)->applyFromArray($this->bodyTabla);
-                            $fila++;
-                            if (count($ingresos) > 0) {
-                                foreach ($ingresos as $ingreso) {
-                                    // SALDOS
-                                    $saldo = 0;
-                                    if ($fecha_ini && $fecha_fin) {
-                                        $sum_reg_ingresos = IngresoDetalle::select("ingreso_detalles.*")
-                                            ->join("ingresos", "ingresos.id", "=", "ingreso_detalles.ingreso_id")->where('ingresos.donacion', 'NO');
-                                        $sum_reg_ingresos->where('ingresos.almacen_id', $almacen->id);
-                                        $sum_reg_ingresos->where('fecha_registro', '<', $fecha_ini);
-                                        $sum_reg_ingresos->where('partida_id', $partida->id);
-                                        $sum_reg_ingresos->where('item_id', $ingreso->item_id);
-                                        // EXTERNO
-                                        $user = Auth::user();
-                                        if ($user->tipo == 'EXTERNO') {
-                                            $sum_reg_ingresos->where('ingresos.unidad_id', $user->unidad_id);
-                                            $sum_reg_ingresos->where('ingresos.user_id', $user->id);
-                                        }
-                                        $sum_reg_ingresos = $sum_reg_ingresos->sum('ingreso_detalles.total');
-
-                                        $reg_egresos = IngresoDetalle::select("ingreso_detalles.*")
-                                            ->join("ingresos", "ingresos.id", "=", "ingreso_detalles.ingreso_id")->where('ingresos.donacion', 'NO')->join(
-                                                'egresos',
-                                                'egresos.ingreso_id',
-                                                '=',
-                                                'ingresos.id',
-                                            );
-                                        $reg_egresos->where('egresos.almacen_id', $almacen->id);
-                                        $reg_egresos->where('egresos.fecha_registro', '<', $fecha_ini);
-                                        $reg_egresos->where('egresos.partida_id', $partida->id);
-                                        $reg_egresos->where('egresos.item_id', $ingreso->item_id);
-                                        // EXTERNO
-                                        $user = Auth::user();
-                                        if ($user->tipo == 'EXTERNO') {
-                                            $reg_egresos->where('ingresos.unidad_id', $user->unidad_id);
-                                            $reg_egresos->where('ingresos.user_id', $user->id);
-                                        }
-                                        $reg_egresos = $reg_egresos->sum('egresos.total');
-                                        $saldo = $sum_reg_ingresos - $reg_egresos;
-                                    }
-
-                                    $sheet->setCellValue('A' . $fila, $cont++);
-                                    $sheet->setCellValue('B' . $fila, $ingreso->ingreso_id);
-                                    $sheet->setCellValue('C' . $fila, $ingreso->unidad_medida->nombre);
-                                    $sheet->setCellValue('D' . $fila, $ingreso->producto->nombre);
-                                    $sheet->setCellValue('G' . $fila, $saldo);
-                                    $sheet->setCellValue('H' . $fila, $ingreso->ingreso->fecha_ingreso_t);
-                                    $sheet->setCellValue('I' . $fila, $ingreso->cantidad);
-                                    $sheet->setCellValue('J' . $fila, $ingreso->costo);
-                                    $sheet->setCellValue('K' . $fila, $ingreso->total);
-                                    $sheet->setCellValue('L' . $fila, $ingreso->egreso ? $ingreso->egreso->cantidad : 0);
-                                    $sheet->setCellValue('M' . $fila, $ingreso->egreso ? $ingreso->egreso->costo : 0);
-                                    $sheet->setCellValue('N' . $fila, $ingreso->egreso ? $ingreso->egreso->total : 0);
-                                    $sheet->setCellValue('O' . $fila, $ingreso->egreso ? $ingreso->egreso->s_cantidad : $ingreso->cantidad);
-                                    $sheet->setCellValue('P' . $fila, $ingreso->costo);
-                                    $sheet->setCellValue('Q' . $fila,  $ingreso->egreso ? $ingreso->egreso->s_total : $ingreso->total);
-                                    $sheet->getStyle('A' . $fila . ':Q' . $fila)->applyFromArray($this->bodyTabla);
-                                    $sheet->getStyle('F' . $fila . ':Q' . $fila)->applyFromArray($this->celdaCenter);
-
-
-                                    // total partridas
-                                    $totalp1 += (float) $saldo;
-                                    $totalp2 += (float) $ingreso->total;
-                                    $totalp3 += $ingreso->egreso ? (float) $ingreso->egreso->total : 0;
-                                    $totalp4 += $ingreso->egreso ? (float) $ingreso->egreso->s_total : $ingreso->total;
-                                    // Log::debug('DD');
-
-                                    // totalgeneral
-                                    $total1 += (float) $saldo;
-                                    $total2 += (float) $ingreso->total;
-                                    $total3 += $ingreso->egreso ? (float) $ingreso->egreso->total : 0;
-                                    $total4 += $ingreso->egreso ? (float) $ingreso->egreso->s_total : $ingreso->total;
-
-                                    $fila++;
-                                }
-                            }
-
-                            if (count($reg_ingresos) > 0) {
-                                foreach ($reg_ingresos as $r_ingreso) {
-                                    $saldo = $r_ingreso->total;
-                                    if ($r_ingreso->egreso) {
-                                        $saldo = (float) $r_ingreso->total - $r_ingreso->egreso->total;
-                                    }
-
-                                    $sheet->setCellValue('A' . $fila, $cont++);
-                                    $sheet->setCellValue('B' . $fila, $r_ingreso->ingreso_id);
-                                    $sheet->setCellValue('C' . $fila, $r_ingreso->unidad_medida->nombre);
-                                    $sheet->setCellValue('D' . $fila, $r_ingreso->producto->nombre);
-                                    $sheet->setCellValue('G' . $fila, $saldo);
-                                    // $sheet->setCellValue('J' . $fila, $r_ingreso->costo);
-                                    $sheet->setCellValue('Q' . $fila, $saldo);
-                                    $sheet->getStyle('A' . $fila . ':Q' . $fila)->applyFromArray($this->bodyTabla);
-                                    $sheet->getStyle('F' . $fila . ':Q' . $fila)->applyFromArray($this->celdaCenter);
-                                    $fila++;
-                                    // partida
-                                    $totalp1 += (float) $saldo;
-                                    $totalp4 += (float) $saldo;
-
-                                    // general
-                                    $total1 += (float) $saldo;
-                                    $total4 += (float) $saldo;
-                                }
-                            }
-                            $sheet->setCellValue('A' . $fila, 'TOTAL PARTIDA N° ' . $partida->nro_partida);
-                            $sheet->mergeCells("A" . $fila . ":D" . $fila);  //COMBINAR CELDAS
-                            $sheet->setCellValue('G' . $fila, number_format($totalp1, 2, ".", ""));
-                            $sheet->setCellValue('K' . $fila, number_format($totalp2, 2, ".", ""));
-                            $sheet->setCellValue('N' . $fila, number_format($totalp3, 2, ".", ""));
-                            $sheet->setCellValue('Q' . $fila, number_format($totalp4, 2, ".", ""));
-                            $sheet->getStyle('A' . $fila . ':Q' . $fila)->applyFromArray($this->footerTabla);
-                            $fila++;
-                        }
-                    }
-                    $sheet->setCellValue('A' . $fila, 'TOTAL GENERAL');
-                    $sheet->mergeCells("A" . $fila . ":D" . $fila);  //COMBINAR CELDAS
-                    $sheet->setCellValue('G' . $fila, number_format($total1, 2, ".", ""));
-                    $sheet->setCellValue('K' . $fila, number_format($total2, 2, ".", ""));
-                    $sheet->setCellValue('N' . $fila, number_format($total3, 2, ".", ""));
-                    $sheet->setCellValue('Q' . $fila, number_format($total4, 2, ".", ""));
-                    $sheet->getStyle('A' . $fila . ':Q' . $fila)->applyFromArray($this->footerTabla);
-
-                    $fila++;
-                    $fila++;
-                    $fila++;
-                    $fila++;
-                }
-
-                $sheet->getColumnDimension('A')->setWidth(6);
-                $sheet->getColumnDimension('B')->setWidth(20);
-                $sheet->getColumnDimension('C')->setWidth(15);
-                $sheet->getColumnDimension('D')->setWidth(15);
-
-                foreach (range('A', 'Q') as $columnID) {
-                    $sheet->getStyle($columnID)->getAlignment()->setWrapText(true);
-                }
-
-                $sheet->getPageSetup()->setOrientation(\PhpOffice\PhpSpreadsheet\Worksheet\PageSetup::ORIENTATION_LANDSCAPE);
-                $sheet->getPageMargins()->setTop(0.5);
-                $sheet->getPageMargins()->setRight(0.1);
-                $sheet->getPageMargins()->setLeft(0.1);
-                $sheet->getPageMargins()->setBottom(0.1);
-                $sheet->getPageSetup()->setPrintArea('A:Q');
-                $sheet->getPageSetup()->setFitToWidth(1);
-                $sheet->getPageSetup()->setFitToHeight(0);
-            } else {
-                // RESUMEN
-                foreach ($almacens as $almacen) {
-                    $sheet->setCellValue('A' . $fila, Configuracion::first()->razon_social);
-                    $sheet->mergeCells("A" . $fila . ":E" . $fila);  //COMBINAR CELDAS
-                    $sheet->getStyle('A' . $fila . ':E' . $fila)->getAlignment()->setHorizontal('center');
-                    $sheet->getStyle('A' . $fila . ':E' . $fila)->applyFromArray($this->titulo);
-                    $fila++;
-                    $sheet->setCellValue('A' . $fila, "INVENTARIO FÍNOCO VALORADO DE BIENES Y CONSUMO");
-                    $sheet->mergeCells("A" . $fila . ":E" . $fila);  //COMBINAR CELDAS
-                    $sheet->getStyle('A' . $fila . ':E' . $fila)->getAlignment()->setHorizontal('center');
-                    $sheet->getStyle('A' . $fila . ':E' . $fila)->applyFromArray($this->titulo);
-                    $fila++;
-                    $sheet->setCellValue('A' . $fila, $almacen->nombre);
-                    $sheet->mergeCells("A" . $fila . ":E" . $fila);  //COMBINAR CELDAS
-                    $sheet->getStyle('A' . $fila . ':E' . $fila)->getAlignment()->setHorizontal('center');
-                    $sheet->getStyle('A' . $fila . ':E' . $fila)->applyFromArray($this->titulo);
-                    $fila++;
-                    $sheet->setCellValue('A' . $fila, $texto_fecha);
-                    $sheet->mergeCells("A" . $fila . ":E" . $fila);  //COMBINAR CELDAS
-                    $sheet->getStyle('A' . $fila . ':E' . $fila)->getAlignment()->setHorizontal('center');
-                    $sheet->getStyle('A' . $fila . ':E' . $fila)->applyFromArray($this->titulo);
-                    $fila++;
-                    $fila++;
-                    $fila++;
-                    $sheet->setCellValue('A' . $fila, 'PARTIDA');
-                    $sheet->setCellValue('B' . $fila, 'DESCRIPCIÓN');
-                    $sheet->setCellValue('C' . $fila, 'INGRESOS');
-                    $sheet->setCellValue('D' . $fila, 'SALIDAS');
-                    $sheet->setCellValue('E' . $fila, 'SALDOS');
-                    $sheet->getStyle('A' . $fila . ':E' . $fila)->applyFromArray($this->headerTabla);
-                    $fila++;
-                    $total1 = 0;
-                    $total2 = 0;
-                    $total3 = 0;
-                    $cont = 1;
-                    foreach ($partidas as $partida) {
-                        $ingresos = IngresoDetalle::select("ingreso_detalles.*")
-                            ->join("ingresos", "ingresos.id", "=", "ingreso_detalles.ingreso_id")->where('ingresos.donacion', 'NO');
-                        $ingresos->where('ingresos.almacen_id', $almacen->id);
-                        if ($fecha_ini && $fecha_fin) {
-                            $ingresos->whereBetween('fecha_registro', [$fecha_ini, $fecha_fin]);
-                        }
-                        $ingresos->where('ingreso_detalles.partida_id', $partida->id);
-                        // EXTERNO
-                        $user = Auth::user();
-                        if ($user->tipo == 'EXTERNO') {
-                            $ingresos->where('ingresos.unidad_id', $user->unidad_id);
-                            $ingresos->where('ingresos.user_id', $user->id);
-                        }
-                        $ingresos = $ingresos->sum('ingreso_detalles.total');
-
-                        $egresos = IngresoDetalle::select("ingreso_detalles.*")
-                            ->join("ingresos", "ingresos.id", "=", "ingreso_detalles.ingreso_id")->where('ingresos.donacion', 'NO')->join(
-                                'egresos',
-                                'egresos.ingreso_id',
-                                '=',
-                                'ingresos.id',
-                            );
-                        $egresos->where('egresos.almacen_id', $almacen->id);
-                        if ($fecha_ini && $fecha_fin) {
-                            $egresos->whereBetween('egresos.fecha_registro', [$fecha_ini, $fecha_fin]);
-                        }
-
-                        // EXTERNO
-                        if ($user->tipo == 'EXTERNO') {
-                            $egresos->where('ingresos.unidad_id', $user->unidad_id);
-                            $egresos->where('ingresos.user_id', $user->id);
-                        }
-
-                        $egresos->where('egresos.partida_id', $partida->id);
-                        $egresos = $egresos->sum('egresos.total');
-
-                        $saldo = $ingresos - $egresos;
-
-                        $sheet->setCellValue('A' . $fila, $partida->nro_partida);
-                        $sheet->setCellValue('B' . $fila, $partida->nombre);
-                        $sheet->setCellValue('C' . $fila, $ingresos);
-                        $sheet->setCellValue('D' . $fila, $egresos);
-                        $sheet->setCellValue('E' . $fila, $saldo);
-                        $sheet->getStyle('A' . $fila . ':E' . $fila)->applyFromArray($this->bodyTabla);
-                        $sheet->getStyle('A' . $fila . ':E' . $fila)->applyFromArray($this->celdaCenter);
-
-                        $total1 += (float) $ingresos;
-                        $total2 += (float) $egresos;
-                        $total3 += (float) $saldo;
-
-                        $fila++;
-                    }
-                    $sheet->setCellValue('A' . $fila, 'TOTALES');
-                    $sheet->mergeCells("A" . $fila . ":B" . $fila);  //COMBINAR CELDAS
-                    $sheet->setCellValue('C' . $fila, number_format($total1, 2, ".", ""));
-                    $sheet->setCellValue('D' . $fila, number_format($total2, 2, ".", ""));
-                    $sheet->setCellValue('E' . $fila, number_format($total3, 2, ".", ""));
-                    $sheet->getStyle('A' . $fila . ':E' . $fila)->applyFromArray($this->footerTabla);
-
-                    $fila++;
-                    $fila++;
-                    $fila++;
-                    $fila++;
-                }
-
-                $sheet->getColumnDimension('A')->setWidth(15);
-                $sheet->getColumnDimension('B')->setWidth(23);
-                $sheet->getColumnDimension('C')->setWidth(15);
-                $sheet->getColumnDimension('D')->setWidth(15);
-                $sheet->getColumnDimension('E')->setWidth(15);
-
-                foreach (range('A', 'K') as $columnID) {
-                    $sheet->getStyle($columnID)->getAlignment()->setWrapText(true);
-                }
-
-                $sheet->getPageSetup()->setOrientation(\PhpOffice\PhpSpreadsheet\Worksheet\PageSetup::ORIENTATION_LANDSCAPE);
-                $sheet->getPageMargins()->setTop(0.5);
-                $sheet->getPageMargins()->setRight(0.1);
-                $sheet->getPageMargins()->setLeft(0.1);
-                $sheet->getPageMargins()->setBottom(0.1);
-                $sheet->getPageSetup()->setPrintArea('A:E');
-                $sheet->getPageSetup()->setFitToWidth(1);
-                $sheet->getPageSetup()->setFitToHeight(0);
-            }
-
-
-
-            // DESCARGA DEL ARCHIVO
-            header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-            header('Content-Disposition: attachment;filename="cuatrimestral_' . $formato . '.xlsx"');
-            header('Cache-Control: max-age=0');
-            $writer = IOFactory::createWriter($spreadsheet, 'Xlsx');
-            $writer->save('php://output');
+            $canvas->page_text($ancho - 90, $alto - 25, "Página {PAGE_NUM} de {PAGE_COUNT}", null, 9, [0, 0, 0]);
+            return $pdf->stream('cuatrimestral_resumen.pdf');
         }
+        return $this->r_cuatrimestral_resumen_excel($reporteResumen, $texto_fecha);
     }
 
     public function conciliacion()
@@ -1097,212 +1053,214 @@ class ReporteController extends Controller
         return Inertia::render("Reportes/Conciliacion");
     }
 
+    /**
+     * Conciliación: almacenes con grupo != CENTROS, SP resumen por almacén, agrupa por partida, calcula c,d,e,dif.
+     */
+    private function buildConciliacionReporteData($almacens, $fecha_ini, $fecha_fin, $donacion = 'NO'): array
+    {
+        $user = Auth::user();
+        $partidasOrden = Partida::orderBy('nro_partida')->get();
+        $agregado = [];
+
+        foreach ($almacens as $almacen) {
+            $filas = \Illuminate\Support\Facades\DB::select(
+                'CALL sp_reporte_resumen(?, ?, ?, ?, ?, ?, ?, ?)',
+                [
+                    $fecha_ini,
+                    $fecha_fin,
+                    $donacion,
+                    $almacen->grupo,
+                    $almacen->id,
+                    $user->tipo ?? '',
+                    $user->unidad_id ?? 0,
+                    $user->id ?? 0,
+                ]
+            );
+            foreach ($filas as $fila) {
+                $pid = $fila->partida_id;
+                if (!isset($agregado[$pid])) {
+                    $agregado[$pid] = ['ingresos' => 0, 'egresos' => 0];
+                }
+                $agregado[$pid]['ingresos'] += (float) $fila->ingresos;
+                $agregado[$pid]['egresos'] += (float) $fila->egresos;
+            }
+        }
+
+        $partidas = [];
+        $totales = ['ingresos' => 0, 'egresos' => 0, 'c' => 0, 'd' => 0, 'e' => 0, 'dif' => 0];
+        foreach ($partidasOrden as $partida) {
+            $pid = $partida->id;
+            $ing = $agregado[$pid]['ingresos'] ?? 0;
+            $egr = $agregado[$pid]['egresos'] ?? 0;
+            $c = $ing - $egr;
+            $d = $ing - $egr + $c;
+            $e = $ing - $egr + $c - $d;
+            $dif = $ing - $egr + $c - $d - $e;
+
+            $partidas[] = [
+                'partida' => [
+                    'id' => $partida->id,
+                    'nro_partida' => $partida->nro_partida,
+                    'nombre' => $partida->nombre,
+                ],
+                'ingresos' => $ing,
+                'egresos' => $egr,
+                'c' => $c,
+                'd' => $d,
+                'e' => $e,
+                'dif' => $dif,
+            ];
+            $totales['ingresos'] += $ing;
+            $totales['egresos'] += $egr;
+            $totales['c'] += $c;
+            $totales['d'] += $d;
+            $totales['e'] += $e;
+            $totales['dif'] += $dif;
+        }
+
+        return ['partidas' => $partidas, 'totales' => $totales];
+    }
+
+    /**
+     * Excel conciliación (datos precalculados).
+     */
+    private function r_conciliacion_excel(array $reporteConciliacion, $texto_fecha, $fecha_ini)
+    {
+        $configuracion = \App\Models\Configuracion::first();
+        $spreadsheet = new Spreadsheet();
+        $spreadsheet->getProperties()
+            ->setCreator("ADMIN")->setLastModifiedBy('Administración')
+            ->setTitle('Conciliación')->setSubject('Conciliación')
+            ->setDescription('Conciliación')->setKeywords('PHPSpreadsheet')
+            ->setCategory('Listado');
+        $sheet = $spreadsheet->getActiveSheet();
+        $spreadsheet->getDefaultStyle()->getFont()->setName('Arial');
+
+        $fila = 1;
+        if (file_exists(public_path() . '/imgs/' . $configuracion->logo)) {
+            $drawing = new \PhpOffice\PhpSpreadsheet\Worksheet\Drawing();
+            $drawing->setName('logo')->setDescription('logo');
+            $drawing->setPath(public_path() . '/imgs/' . $configuracion->logo);
+            $drawing->setCoordinates('A' . $fila)->setOffsetX(5)->setOffsetY(0)->setHeight(60);
+            $drawing->setWorksheet($sheet);
+        }
+        $fila = 2;
+        $sheet->setCellValue('A' . $fila, $configuracion->razon_social);
+        $sheet->mergeCells("A{$fila}:H{$fila}");
+        $sheet->getStyle("A{$fila}:H{$fila}")->getAlignment()->setHorizontal('center');
+        $sheet->getStyle("A{$fila}:H{$fila}")->applyFromArray($this->titulo);
+        $fila++;
+        $sheet->setCellValue('A' . $fila, "CONCILIACIÓN PRESUPUESTO - CONTABLE (BIENES DE CONSUMO)");
+        $sheet->mergeCells("A{$fila}:H{$fila}");
+        $sheet->getStyle("A{$fila}:H{$fila}")->getAlignment()->setHorizontal('center');
+        $sheet->getStyle("A{$fila}:H{$fila}")->applyFromArray($this->titulo);
+        $fila++;
+        $sheet->setCellValue('A' . $fila, $texto_fecha);
+        $sheet->mergeCells("A{$fila}:H{$fila}");
+        $sheet->getStyle("A{$fila}:H{$fila}")->getAlignment()->setHorizontal('center');
+        $sheet->getStyle("A{$fila}:H{$fila}")->applyFromArray($this->titulo);
+        $fila++;
+        $sheet->setCellValue('A' . $fila, "(Expresado en bolivianos)");
+        $sheet->mergeCells("A{$fila}:H{$fila}");
+        $sheet->getStyle("A{$fila}:H{$fila}")->getAlignment()->setHorizontal('center');
+        $sheet->getStyle("A{$fila}:H{$fila}")->applyFromArray($this->titulo);
+        $fila++; $fila++; $fila++;
+
+        $sheet->setCellValue('A' . $fila, 'PARTIDA');
+        $sheet->mergeCells("A{$fila}:A" . ($fila + 1));
+        $sheet->setCellValue('B' . $fila, 'GRUPO CONTABLE');
+        $sheet->mergeCells("B{$fila}:B" . ($fila + 1));
+        $sheet->setCellValue('C' . $fila, 'INVENTARIO');
+        $sheet->setCellValue('D' . $fila, 'REPORTE SEGIP');
+        $txt_fecha = $fecha_ini ? "PAGOS GESTIÓN " . date("Y", strtotime($fecha_ini)) . "\n(c)" : "PAGOS GESTIÓN\n(c)";
+        $sheet->setCellValue('E' . $fila, $txt_fecha);
+        $sheet->mergeCells("E{$fila}:E" . ($fila + 1));
+        $txt_fecha = $fecha_ini ? "DONACIONES GESTIÓN " . date("Y", strtotime($fecha_ini)) . "\n(d)" : "DONACIONES GESTIÓN\n(d)";
+        $sheet->setCellValue('F' . $fila, $txt_fecha);
+        $sheet->mergeCells("F{$fila}:F" . ($fila + 1));
+        $sheet->setCellValue('G' . $fila, "POR PAGAR\n(d)");
+        $sheet->mergeCells("G{$fila}:G" . ($fila + 1));
+        $sheet->setCellValue('H' . $fila, "DIFERENCIA\na-b+c-d-e=( )");
+        $sheet->mergeCells("H{$fila}:H" . ($fila + 1));
+        $sheet->getStyle("A{$fila}:H{$fila}")->applyFromArray($this->headerTabla);
+        $fila++;
+        $sheet->setCellValue('C' . $fila, "BIENES DE CONSUMO ADQUIRIDOS\n(a)");
+        $sheet->setCellValue('D' . $fila, "PRESUPUESTO EJECUTADO\n(b)");
+        $sheet->getStyle("A{$fila}:H{$fila}")->applyFromArray($this->headerTabla);
+        $fila++;
+
+        foreach ($reporteConciliacion['partidas'] as $item) {
+            $sheet->setCellValue('A' . $fila, $item['partida']['nro_partida']);
+            $sheet->setCellValue('B' . $fila, $item['partida']['nombre']);
+            $sheet->setCellValue('C' . $fila, $item['ingresos']);
+            $sheet->setCellValue('D' . $fila, $item['egresos']);
+            $sheet->setCellValue('E' . $fila, $item['c']);
+            $sheet->setCellValue('F' . $fila, $item['d']);
+            $sheet->setCellValue('G' . $fila, $item['e']);
+            $sheet->setCellValue('H' . $fila, $item['dif']);
+            $sheet->getStyle("A{$fila}:H{$fila}")->applyFromArray($this->bodyTabla);
+            $sheet->getStyle("A{$fila}:H{$fila}")->applyFromArray($this->celdaCenter);
+            $fila++;
+        }
+
+        $tot = $reporteConciliacion['totales'];
+        $sheet->setCellValue('A' . $fila, 'TOTAL');
+        $sheet->mergeCells("A{$fila}:B{$fila}");
+        $sheet->setCellValue('C' . $fila, number_format($tot['ingresos'], 2, ".", ""));
+        $sheet->setCellValue('D' . $fila, number_format($tot['egresos'], 2, ".", ""));
+        $sheet->setCellValue('E' . $fila, number_format($tot['c'], 2, ".", ""));
+        $sheet->setCellValue('F' . $fila, number_format($tot['d'], 2, ".", ""));
+        $sheet->setCellValue('G' . $fila, number_format($tot['e'], 2, ".", ""));
+        $sheet->setCellValue('H' . $fila, number_format($tot['dif'], 2, ".", ""));
+        $sheet->getStyle("A{$fila}:H{$fila}")->applyFromArray($this->footerTabla);
+
+        $sheet->getColumnDimension('A')->setWidth(15);
+        $sheet->getColumnDimension('B')->setWidth(23);
+        foreach (range('C', 'H') as $col) {
+            $sheet->getColumnDimension($col)->setWidth(15);
+        }
+        foreach (range('A', 'H') as $col) {
+            $sheet->getStyle($col)->getAlignment()->setWrapText(true);
+        }
+        $sheet->getPageSetup()->setOrientation(\PhpOffice\PhpSpreadsheet\Worksheet\PageSetup::ORIENTATION_LANDSCAPE);
+        $sheet->getPageMargins()->setTop(0.5)->setRight(0.1)->setLeft(0.1)->setBottom(0.1);
+        $sheet->getPageSetup()->setPrintArea('A:H')->setFitToWidth(1)->setFitToHeight(0);
+        header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        header('Content-Disposition: attachment;filename="conciliacion.xlsx"');
+        header('Cache-Control: max-age=0');
+        $writer = IOFactory::createWriter($spreadsheet, 'Xlsx');
+        $writer->save('php://output');
+    }
+
     public function r_conciliacion(Request $request)
     {
         $fecha_ini = $request->fecha_ini;
         $fecha_fin = $request->fecha_fin;
         $tipo = $request->tipo;
+        $donacion = in_array($request->donacion, ['SI', 'NO']) ? $request->donacion : 'NO';
 
-        $partidas = Partida::all();
         $almacens = Almacen::select("almacens.*");
         $id_almacens = AlmacenController::getIdAlmacensPermiso(Auth::user());
         $almacens->whereIn("id", $id_almacens);
         $almacens->where("grupo", "!=", "CENTROS");
-
         $almacens = $almacens->get();
 
         $texto_fecha = ReporteController::getFechaTexto($fecha_ini, $fecha_fin);
-
+        $reporteConciliacion = $this->buildConciliacionReporteData($almacens, $fecha_ini, $fecha_fin, $donacion);
+        $configuracion = \App\Models\Configuracion::first();
 
         if ($tipo == 'pdf') {
-            $archivo = "reportes.conciliacion";
-            $orientacion =  'landscape';
-            $pdf = PDF::loadView($archivo, compact('partidas', 'almacens', 'fecha_ini', 'fecha_fin', 'texto_fecha'))->setPaper('letter', $orientacion);
-
-            // ENUMERAR LAS PÁGINAS USANDO CANVAS
+            $pdf = PDF::loadView('reportes.conciliacion_sp', compact('reporteConciliacion', 'texto_fecha', 'configuracion', 'fecha_ini'))->setPaper('letter', 'landscape');
             $pdf->output();
             $dom_pdf = $pdf->getDomPDF();
             $canvas = $dom_pdf->get_canvas();
             $alto = $canvas->get_height();
             $ancho = $canvas->get_width();
-            $canvas->page_text($ancho - 90, $alto - 25, "Página {PAGE_NUM} de {PAGE_COUNT}", null, 9, array(0, 0, 0));
-            return $pdf->stream('bimestral_detalle.pdf');
-        } else {
-            // EXCEL
-            $spreadsheet = new Spreadsheet();
-            $spreadsheet->getProperties()
-                ->setCreator("ADMIN")
-                ->setLastModifiedBy('Administración')
-                ->setTitle('Formularios')
-                ->setSubject('Formularios')
-                ->setDescription('Formularios')
-                ->setKeywords('PHPSpreadsheet')
-                ->setCategory('Listado');
-
-            $sheet = $spreadsheet->getActiveSheet();
-
-            $spreadsheet->getDefaultStyle()->getFont()->setName('Arial');
-
-            $fila = 1;
-            if (file_exists(public_path() . '/imgs/' . Configuracion::first()->logo)) {
-                $drawing = new \PhpOffice\PhpSpreadsheet\Worksheet\Drawing();
-                $drawing->setName('logo');
-                $drawing->setDescription('logo');
-                $drawing->setPath(public_path() . '/imgs/' . Configuracion::first()->logo); // put your path and image here
-                $drawing->setCoordinates('A' . $fila);
-                $drawing->setOffsetX(5);
-                $drawing->setOffsetY(0);
-                $drawing->setHeight(60);
-                $drawing->setWorksheet($sheet);
-            }
-
-            $fila = 2;
-            $sheet->setCellValue('A' . $fila, Configuracion::first()->razon_social);
-            $sheet->mergeCells("A" . $fila . ":H" . $fila);  //COMBINAR CELDAS
-            $sheet->getStyle('A' . $fila . ':H' . $fila)->getAlignment()->setHorizontal('center');
-            $sheet->getStyle('A' . $fila . ':H' . $fila)->applyFromArray($this->titulo);
-            $fila++;
-            $sheet->setCellValue('A' . $fila, "CONCILIACIÓN PRESUPUESTO - CONTABLE (BIENES DE CONSUMO)");
-            $sheet->mergeCells("A" . $fila . ":H" . $fila);  //COMBINAR CELDAS
-            $sheet->getStyle('A' . $fila . ':H' . $fila)->getAlignment()->setHorizontal('center');
-            $sheet->getStyle('A' . $fila . ':H' . $fila)->applyFromArray($this->titulo);
-            $fila++;
-            $sheet->setCellValue('A' . $fila, $texto_fecha);
-            $sheet->mergeCells("A" . $fila . ":H" . $fila);  //COMBINAR CELDAS
-            $sheet->getStyle('A' . $fila . ':H' . $fila)->getAlignment()->setHorizontal('center');
-            $sheet->getStyle('A' . $fila . ':H' . $fila)->applyFromArray($this->titulo);
-            $fila++;
-            $sheet->setCellValue('A' . $fila, "(Expresado en bolivianos)");
-            $sheet->mergeCells("A" . $fila . ":H" . $fila);  //COMBINAR CELDAS
-            $sheet->getStyle('A' . $fila . ':H' . $fila)->getAlignment()->setHorizontal('center');
-            $sheet->getStyle('A' . $fila . ':H' . $fila)->applyFromArray($this->titulo);
-            $fila++;
-            $fila++;
-            $fila++;
-            $sheet->setCellValue('A' . $fila, 'PARTIDA');
-            $sheet->mergeCells("A" . $fila . ":A" . $fila + 1);  //COMBINAR CELDAS
-            $sheet->setCellValue('B' . $fila, 'GRUPO CONTABLE');
-            $sheet->mergeCells("B" . $fila . ":B" . $fila + 1);  //COMBINAR CELDAS
-            $sheet->setCellValue('C' . $fila, 'INVENTARIO');
-            $sheet->setCellValue('D' . $fila, 'REPORTE SEGIP');
-            $txt_fecha = $fecha_ini ? "PAGOS GESTIÓN " . date("Y", strtotime($fecha_ini)) . "\n(c)" : "PAGOS GESTIÓN\n(c)";
-            $sheet->setCellValue('E' . $fila, $txt_fecha);
-            $sheet->mergeCells("e" . $fila . ":e" . $fila + 1);  //COMBINAR CELDAS
-            $txt_fecha = $fecha_ini ? "DONACIONES GESTIÓN " . date("Y", strtotime($fecha_ini)) . "\n(c)" : "DONACIONES GESTIÓN\n(c)";
-            $sheet->setCellValue('F' . $fila, $txt_fecha);
-            $sheet->mergeCells("F" . $fila . ":F" . $fila + 1);  //COMBINAR CELDAS
-            $sheet->setCellValue('G' . $fila, "POR PAGAR\n(d)");
-            $sheet->mergeCells("G" . $fila . ":G" . $fila + 1);  //COMBINAR CELDAS
-            $sheet->setCellValue('H' . $fila, "DIFERENCIA\na-b+c-d-e=( )");
-            $sheet->mergeCells("H" . $fila . ":H" . $fila + 1);  //COMBINAR CELDAS
-            $sheet->getStyle('A' . $fila . ':H' . $fila)->applyFromArray($this->headerTabla);
-            $fila++;
-            $sheet->setCellValue('C' . $fila, "BIENES DE CONSUMO ADQUIRIDOS\n(a)");
-            $sheet->setCellValue('D' . $fila, "PRESUPUESTO EJECUTADO\n(b)");
-            $sheet->getStyle('A' . $fila . ':H' . $fila)->applyFromArray($this->headerTabla);
-            $fila++;
-            $total1 = 0;
-            $total2 = 0;
-            $total3 = 0;
-            $total4 = 0;
-            $total5 = 0;
-            $total6 = 0;
-            $cont = 1;
-            foreach ($partidas as $partida) {
-                // POR PARTIDAS
-                $ingresos = IngresoDetalle::select("ingreso_detalles.*")
-                    ->join("ingresos", "ingresos.id", "=", "ingreso_detalles.ingreso_id");
-                if ($fecha_ini && $fecha_fin) {
-                    $ingresos->whereBetween('fecha_registro', [$fecha_ini, $fecha_fin]);
-                }
-                // EXTERNO
-                $user = Auth::user();
-                if ($user->tipo == 'EXTERNO') {
-                    $ingresos->where('ingresos.unidad_id', $user->unidad_id);
-                    $ingresos->where('ingresos.user_id', $user->id);
-                }
-                $ingresos->where('partida_id', $partida->id);
-                $ingresos = $ingresos->sum('ingreso_detalles.total');
-
-                $egresos = Egreso::select('egresos.*')->join(
-                    'ingreso_detalles',
-                    'ingreso_detalles.id',
-                    '=',
-                    'egresos.ingreso_detalle_id',
-                )->join('ingresos', 'ingresos.id', '=', 'ingreso_detalles.ingreso_id');
-                if ($fecha_ini && $fecha_fin) {
-                    $egresos->whereBetween('egresos.fecha_registro', [$fecha_ini, $fecha_fin]);
-                }
-                // EXTERNO
-                if ($user->tipo == 'EXTERNO') {
-                    $egresos->where('ingresos.unidad_id', $user->unidad_id);
-                    $egresos->where('ingresos.user_id', $user->id);
-                }
-
-                $egresos->where('egresos.partida_id', $partida->id);
-                $egresos = $egresos->sum('egresos.total');
-
-                $c = $ingresos - $egresos;
-                $d = $ingresos - $egresos + $c;
-                $e = $ingresos - $egresos + $c - $d;
-                $dif = $ingresos - $egresos + $c - $d - $e;
-
-                $sheet->setCellValue('A' . $fila, $partida->nro_partida);
-                $sheet->setCellValue('B' . $fila, $partida->nombre);
-                $sheet->setCellValue('C' . $fila, $ingresos);
-                $sheet->setCellValue('D' . $fila, $egresos);
-                $sheet->setCellValue('E' . $fila, $c);
-                $sheet->setCellValue('F' . $fila, $d);
-                $sheet->setCellValue('G' . $fila, $e);
-                $sheet->setCellValue('H' . $fila, $dif);
-                $sheet->getStyle('A' . $fila . ':H' . $fila)->applyFromArray($this->bodyTabla);
-                $sheet->getStyle('A' . $fila . ':H' . $fila)->applyFromArray($this->celdaCenter);
-                $total1 += (float) $ingresos;
-                $total2 += (float) $egresos;
-                $total3 += (float) $c;
-                $total4 += (float) $d;
-                $total5 += (float) $e;
-                $total6 += (float) $dif;
-
-                $fila++;
-            }
-            $sheet->setCellValue('A' . $fila, 'TOTAL');
-            $sheet->mergeCells("A" . $fila . ":B" . $fila);  //COMBINAR CELDAS
-            $sheet->setCellValue('C' . $fila, number_format($total1, 2, ".", ""));
-            $sheet->setCellValue('D' . $fila, number_format($total2, 2, ".", ""));
-            $sheet->setCellValue('E' . $fila, number_format($total3, 2, ".", ""));
-            $sheet->setCellValue('F' . $fila, number_format($total4, 2, ".", ""));
-            $sheet->setCellValue('G' . $fila, number_format($total5, 2, ".", ""));
-            $sheet->setCellValue('H' . $fila, number_format($total6, 2, ".", ""));
-            $sheet->getStyle('A' . $fila . ':H' . $fila)->applyFromArray($this->footerTabla);
-            $sheet->getColumnDimension('A')->setWidth(15);
-            $sheet->getColumnDimension('B')->setWidth(23);
-            $sheet->getColumnDimension('C')->setWidth(15);
-            $sheet->getColumnDimension('D')->setWidth(15);
-            $sheet->getColumnDimension('E')->setWidth(15);
-            $sheet->getColumnDimension('F')->setWidth(15);
-            $sheet->getColumnDimension('G')->setWidth(15);
-            $sheet->getColumnDimension('H')->setWidth(15);
-
-            foreach (range('A', 'H') as $columnID) {
-                $sheet->getStyle($columnID)->getAlignment()->setWrapText(true);
-            }
-
-            $sheet->getPageSetup()->setOrientation(\PhpOffice\PhpSpreadsheet\Worksheet\PageSetup::ORIENTATION_LANDSCAPE);
-            $sheet->getPageMargins()->setTop(0.5);
-            $sheet->getPageMargins()->setRight(0.1);
-            $sheet->getPageMargins()->setLeft(0.1);
-            $sheet->getPageMargins()->setBottom(0.1);
-            $sheet->getPageSetup()->setPrintArea('A:H');
-            $sheet->getPageSetup()->setFitToWidth(1);
-            $sheet->getPageSetup()->setFitToHeight(0);
-            // DESCARGA DEL ARCHIVO
-            header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-            header('Content-Disposition: attachment;filename="conciliacion.xlsx"');
-            header('Cache-Control: max-age=0');
-            $writer = IOFactory::createWriter($spreadsheet, 'Xlsx');
-            $writer->save('php://output');
+            $canvas->page_text($ancho - 90, $alto - 25, "Página {PAGE_NUM} de {PAGE_COUNT}", null, 9, [0, 0, 0]);
+            return $pdf->stream('conciliacion.pdf');
         }
+
+        return $this->r_conciliacion_excel($reporteConciliacion, $texto_fecha, $fecha_ini);
     }
 
     public static function getFechaTexto($fecha_ini, $fecha_fin)

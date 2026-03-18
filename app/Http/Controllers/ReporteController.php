@@ -205,27 +205,27 @@ class ReporteController extends Controller
             } else {
                 return $this->r_bimestral_detalle_excel($reporte, $fecha_ini, $fecha_fin, $texto_fecha);
             }
+        } else if ($formato == 'resumen') {
+            // ── RESUMEN: SP sp_reporte_resumen por almacén, agrupado por partida ──
+            $reporteResumen = $this->buildBimestralResumenReporteData($almacens, $fecha_ini, $fecha_fin, $donacion);
+
+            if ($tipo == 'pdf') {
+                $pdf = PDF::loadView(
+                    'reportes.bimestral_resumen_sp',
+                    compact('reporteResumen', 'texto_fecha', 'configuracion')
+                )->setPaper('letter', 'portrait');
+
+                $pdf->output();
+                $dom_pdf = $pdf->getDomPDF();
+                $canvas  = $dom_pdf->get_canvas();
+                $alto    = $canvas->get_height();
+                $ancho   = $canvas->get_width();
+                $canvas->page_text($ancho - 90, $alto - 25, "Página {PAGE_NUM} de {PAGE_COUNT}", null, 9, [0, 0, 0]);
+                return $pdf->stream('bimestral_resumen.pdf');
+            } else {
+                return $this->r_bimestral_resumen_excel($reporteResumen, $texto_fecha);
+            }
         }
-
-        // ── RESUMEN: SP sp_reporte_resumen por almacén, agrupado por partida ──
-        $reporteResumen = $this->buildBimestralResumenReporteData($almacens, $fecha_ini, $fecha_fin, $donacion);
-
-        if ($tipo == 'pdf') {
-            $pdf = PDF::loadView(
-                'reportes.bimestral_resumen_sp',
-                compact('reporteResumen', 'texto_fecha', 'configuracion')
-            )->setPaper('letter', 'portrait');
-
-            $pdf->output();
-            $dom_pdf = $pdf->getDomPDF();
-            $canvas  = $dom_pdf->get_canvas();
-            $alto    = $canvas->get_height();
-            $ancho   = $canvas->get_width();
-            $canvas->page_text($ancho - 90, $alto - 25, "Página {PAGE_NUM} de {PAGE_COUNT}", null, 9, [0, 0, 0]);
-            return $pdf->stream('bimestral_resumen.pdf');
-        }
-
-        return $this->r_bimestral_resumen_excel($reporteResumen, $texto_fecha);
     }
 
     // =========================================================================
@@ -252,7 +252,9 @@ class ReporteController extends Controller
             // Filtro EXTERNO en memoria (el SP ya filtra por almacen_id,
             // pero el filtro de unidad/user es extra)
             if ($user->tipo == 'EXTERNO') {
-                $filas = array_filter($filas, fn($f) =>
+                $filas = array_filter(
+                    $filas,
+                    fn($f) =>
                     $f->unidad_id == $user->unidad_id && $f->user_id == $user->id
                 );
                 $filas = array_values($filas);
@@ -263,10 +265,16 @@ class ReporteController extends Controller
             }
 
             // Totales generales del almacén
-            $tot = ['saldo_ant_cant' => 0, 'saldo_ant_total' => 0,
-                    'ingreso_cant'   => 0, 'ingreso_total'   => 0,
-                    'egreso_cant'    => 0, 'egreso_total'    => 0,
-                    'saldo_fin_cant' => 0, 'saldo_fin_total' => 0];
+            $tot = [
+                'saldo_ant_cant' => 0,
+                'saldo_ant_total' => 0,
+                'ingreso_cant'   => 0,
+                'ingreso_total'   => 0,
+                'egreso_cant'    => 0,
+                'egreso_total'    => 0,
+                'saldo_fin_cant' => 0,
+                'saldo_fin_total' => 0
+            ];
 
             // Agrupar por partida
             $grouped = [];
@@ -283,10 +291,16 @@ class ReporteController extends Controller
             $partidas_data = [];
             foreach ($grouped as $pid => $gdata) {
                 // Subtotales de la partida
-                $sub = ['saldo_ant_cant' => 0, 'saldo_ant_total' => 0,
-                        'ingreso_cant'   => 0, 'ingreso_total'   => 0,
-                        'egreso_cant'    => 0, 'egreso_total'    => 0,
-                        'saldo_fin_cant' => 0, 'saldo_fin_total' => 0];
+                $sub = [
+                    'saldo_ant_cant' => 0,
+                    'saldo_ant_total' => 0,
+                    'ingreso_cant'   => 0,
+                    'ingreso_total'   => 0,
+                    'egreso_cant'    => 0,
+                    'egreso_total'    => 0,
+                    'saldo_fin_cant' => 0,
+                    'saldo_fin_total' => 0
+                ];
 
                 foreach ($gdata['filas'] as $f) {
                     $sub['saldo_ant_cant']  += (float) $f->saldo_anterior_cantidad;
@@ -334,55 +348,88 @@ class ReporteController extends Controller
             ->setTitle('Bimestral Detalle')->setSubject('Bimestral Detalle')
             ->setDescription('Bimestral Detalle')->setKeywords('PHPSpreadsheet')
             ->setCategory('Listado');
-        $sheet = $spreadsheet->getActiveSheet();
         $spreadsheet->getDefaultStyle()->getFont()->setName('Arial');
-
-        $fila = 1;
-        if (file_exists(public_path() . '/imgs/' . $configuracion->logo)) {
-            $drawing = new \PhpOffice\PhpSpreadsheet\Worksheet\Drawing();
-            $drawing->setName('logo')->setDescription('logo');
-            $drawing->setPath(public_path() . '/imgs/' . $configuracion->logo);
-            $drawing->setCoordinates('A1')->setOffsetX(5)->setOffsetY(0)->setHeight(60);
-            $drawing->setWorksheet($sheet);
-        }
-        $fila = 2;
 
         $txt_sd = $fecha_ini ? 'SALDO AL ' . date('d/m/Y', strtotime($fecha_ini)) : 'SALDO ANTERIOR';
         $txt_sf = $fecha_fin ? 'SALDO AL ' . date('d/m/Y', strtotime($fecha_fin)) : 'SALDO';
 
-        foreach ($reporte as $bloque) {
+        foreach ($reporte as $index => $bloque) {
+            // Crear/seleccionar hoja por almacén
+            if ($index === 0) {
+                $sheet = $spreadsheet->getActiveSheet();
+            } else {
+                $sheet = $spreadsheet->createSheet($index);
+            }
+
+            $nombreHoja = mb_substr($bloque['almacen']['nombre'], 0, 31);
+            $sheet->setTitle($nombreHoja);
+
+            $fila = 1;
+            if (file_exists(public_path() . '/imgs/' . $configuracion->logo)) {
+                $drawing = new \PhpOffice\PhpSpreadsheet\Worksheet\Drawing();
+                $drawing->setName('logo')->setDescription('logo');
+                $drawing->setPath(public_path() . '/imgs/' . $configuracion->logo);
+                $drawing->setCoordinates('A1')->setOffsetX(5)->setOffsetY(0)->setHeight(60);
+                $drawing->setWorksheet($sheet);
+            }
+            $fila = 2;
+
             // ── Encabezado del almacén ────────────────────────────────────────
-            foreach ([
-                $configuracion->razon_social,
-                'SALDOS FÍSICOS VALORADOS DE EXISTENCIAS DE ALMACENES',
-                $bloque['almacen']['nombre'],
-                $texto_fecha,
-            ] as $txt) {
+            foreach (
+                [
+                    $configuracion->razon_social,
+                    'SALDOS FÍSICOS VALORADOS DE EXISTENCIAS DE ALMACENES',
+                    $bloque['almacen']['nombre'],
+                    $texto_fecha,
+                ] as $txt
+            ) {
                 $sheet->setCellValue('A' . $fila, $txt);
                 $sheet->mergeCells("A{$fila}:Q{$fila}");
                 $sheet->getStyle("A{$fila}:Q{$fila}")->getAlignment()->setHorizontal('center');
                 $sheet->getStyle("A{$fila}:Q{$fila}")->applyFromArray($this->titulo);
                 $fila++;
             }
-            $fila++; $fila++;
+            $fila++;
+            $fila++;
 
             // ── Cabecera de tabla (2 filas) ───────────────────────────────────
-            $sheet->setCellValue('A' . $fila, 'N°');     $sheet->mergeCells("A{$fila}:A" . ($fila+1));
-            $sheet->setCellValue('B' . $fila, 'CÓDIGO'); $sheet->mergeCells("B{$fila}:B" . ($fila+1));
-            $sheet->setCellValue('C' . $fila, 'UNIDAD'); $sheet->mergeCells("C{$fila}:C" . ($fila+1));
-            $sheet->setCellValue('D' . $fila, 'DESCRIPCIÓN'); $sheet->mergeCells("D{$fila}:D" . ($fila+1));
-            $sheet->setCellValue('E' . $fila, $txt_sd);  $sheet->mergeCells("E{$fila}:G{$fila}");
-            $sheet->setCellValue('H' . $fila, 'FECHA INGRESO'); $sheet->mergeCells("H{$fila}:H" . ($fila+1));
-            $sheet->setCellValue('I' . $fila, 'INGRESO ALMACENES'); $sheet->mergeCells("I{$fila}:K{$fila}");
-            $sheet->setCellValue('L' . $fila, 'SALIDA ALMACENES'); $sheet->mergeCells("L{$fila}:N{$fila}");
-            $sheet->setCellValue('O' . $fila, $txt_sf);  $sheet->mergeCells("O{$fila}:Q{$fila}");
+            $sheet->setCellValue('A' . $fila, 'N°');
+            $sheet->mergeCells("A{$fila}:A" . ($fila + 1));
+            $sheet->setCellValue('B' . $fila, 'CÓDIGO');
+            $sheet->mergeCells("B{$fila}:B" . ($fila + 1));
+            $sheet->setCellValue('C' . $fila, 'UNIDAD');
+            $sheet->mergeCells("C{$fila}:C" . ($fila + 1));
+            $sheet->setCellValue('D' . $fila, 'DESCRIPCIÓN');
+            $sheet->mergeCells("D{$fila}:D" . ($fila + 1));
+            $sheet->setCellValue('E' . $fila, $txt_sd);
+            $sheet->mergeCells("E{$fila}:G{$fila}");
+            $sheet->setCellValue('H' . $fila, 'FECHA INGRESO');
+            $sheet->mergeCells("H{$fila}:H" . ($fila + 1));
+            $sheet->setCellValue('I' . $fila, 'INGRESO ALMACENES');
+            $sheet->mergeCells("I{$fila}:K{$fila}");
+            $sheet->setCellValue('L' . $fila, 'SALIDA ALMACENES');
+            $sheet->mergeCells("L{$fila}:N{$fila}");
+            $sheet->setCellValue('O' . $fila, $txt_sf);
+            $sheet->mergeCells("O{$fila}:Q{$fila}");
             $sheet->getStyle("A{$fila}:Q{$fila}")->applyFromArray($this->headerTabla);
             $fila++;
 
-            foreach (['E'=>'CANT.','F'=>'C/U','G'=>'TOTAL BS.',
-                      'I'=>'CANT.','J'=>'C/U','K'=>'TOTAL BS.',
-                      'L'=>'CANT.','M'=>'C/U','N'=>'TOTAL BS.',
-                      'O'=>'CANT.','P'=>'C/U','Q'=>'TOTAL BS.'] as $col => $lbl) {
+            foreach (
+                [
+                    'E' => 'CANT.',
+                    'F' => 'C/U',
+                    'G' => 'TOTAL BS.',
+                    'I' => 'CANT.',
+                    'J' => 'C/U',
+                    'K' => 'TOTAL BS.',
+                    'L' => 'CANT.',
+                    'M' => 'C/U',
+                    'N' => 'TOTAL BS.',
+                    'O' => 'CANT.',
+                    'P' => 'C/U',
+                    'Q' => 'TOTAL BS.'
+                ] as $col => $lbl
+            ) {
                 $sheet->setCellValue($col . $fila, $lbl);
             }
             $sheet->getStyle("E{$fila}:Q{$fila}")->applyFromArray($this->headerTabla);
@@ -440,10 +487,14 @@ class ReporteController extends Controller
                 $sheet->setCellValue('O' . $fila, number_format($sub['saldo_fin_cant'],  2, '.', ''));
                 $sheet->setCellValue('Q' . $fila, number_format($sub['saldo_fin_total'], 2, '.', ''));
                 $sheet->getStyle("A{$fila}:Q{$fila}")->applyFromArray($this->footerTabla);
+                $sheet->getStyle("A{$fila}:Q{$fila}")
+                    ->getFill()
+                    ->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
+                    ->getStartColor()->setRGB('4F81BD'); // azul medio oscuro
                 $fila++;
             }
 
-            // Total general del almacén
+            // Total general del almacén (fondo amarillo)
             $tot = $bloque['totales'];
             $sheet->setCellValue('A' . $fila, 'TOTAL GENERAL');
             $sheet->mergeCells("A{$fila}:D{$fila}");
@@ -456,23 +507,26 @@ class ReporteController extends Controller
             $sheet->setCellValue('O' . $fila, number_format($tot['saldo_fin_cant'],  2, '.', ''));
             $sheet->setCellValue('Q' . $fila, number_format($tot['saldo_fin_total'], 2, '.', ''));
             $sheet->getStyle("A{$fila}:Q{$fila}")->applyFromArray($this->footerTabla);
-            $fila++; $fila++; $fila++; $fila++;
-        }
+            $sheet->getStyle("A{$fila}:Q{$fila}")
+                ->getFill()
+                ->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
+                ->getStartColor()->setRGB('FFD966'); // amarillo
 
-        // Ajustes de columna y página
-        $sheet->getColumnDimension('A')->setWidth(6);
-        $sheet->getColumnDimension('B')->setWidth(20);
-        $sheet->getColumnDimension('C')->setWidth(12);
-        $sheet->getColumnDimension('D')->setWidth(30);
-        foreach (range('E', 'Q') as $col) {
-            $sheet->getColumnDimension($col)->setWidth(12);
+            // Ajustes de columna y página por hoja
+            $sheet->getColumnDimension('A')->setWidth(6);
+            $sheet->getColumnDimension('B')->setWidth(20);
+            $sheet->getColumnDimension('C')->setWidth(12);
+            $sheet->getColumnDimension('D')->setWidth(30);
+            foreach (range('E', 'Q') as $col) {
+                $sheet->getColumnDimension($col)->setWidth(12);
+            }
+            foreach (range('A', 'Q') as $col) {
+                $sheet->getStyle($col)->getAlignment()->setWrapText(true);
+            }
+            $sheet->getPageSetup()->setOrientation(\PhpOffice\PhpSpreadsheet\Worksheet\PageSetup::ORIENTATION_LANDSCAPE);
+            $sheet->getPageMargins()->setTop(0.5)->setRight(0.1)->setLeft(0.1)->setBottom(0.1);
+            $sheet->getPageSetup()->setPrintArea('A:Q')->setFitToWidth(1)->setFitToHeight(0);
         }
-        foreach (range('A', 'Q') as $col) {
-            $sheet->getStyle($col)->getAlignment()->setWrapText(true);
-        }
-        $sheet->getPageSetup()->setOrientation(\PhpOffice\PhpSpreadsheet\Worksheet\PageSetup::ORIENTATION_LANDSCAPE);
-        $sheet->getPageMargins()->setTop(0.5)->setRight(0.1)->setLeft(0.1)->setBottom(0.1);
-        $sheet->getPageSetup()->setPrintArea('A:Q')->setFitToWidth(1)->setFitToHeight(0);
 
         header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         header('Content-Disposition: attachment;filename="bimestral_detalle.xlsx"');
@@ -486,60 +540,41 @@ class ReporteController extends Controller
      * agrupa por partida (suma ingresos, egresos, saldo) y devuelve todas las partidas
      * (las vacías con 0). Estructura: ['partidas' => [...], 'totales' => [...]]
      */
-    private function buildBimestralResumenReporteData($almacens, $fecha_ini, $fecha_fin, $donacion = 'NO'): array
+    private function buildBimestralResumenReporteData($almacens, $fecha_ini, $fecha_fin, $donacion): array
     {
-        $user = Auth::user();
-        $partidasOrden = Partida::orderBy('nro_partida')->get();
-        $agregado = [];
-
+        $user   = Auth::user();
+        $reporteResumen = [];
         foreach ($almacens as $almacen) {
             $filas = \Illuminate\Support\Facades\DB::select(
-                'CALL sp_reporte_resumen(?, ?, ?, ?, ?, ?, ?, ?)',
+                'CALL sp_reporte_resumen(?, ?, ?, ?, ?, ?, ?)',
                 [
                     $fecha_ini,
                     $fecha_fin,
-                    $donacion,
-                    'CENTROS',
                     $almacen->id,
-                    $user->tipo ?? '',
-                    $user->unidad_id ?? 0,
-                    $user->id ?? 0,
+                    $donacion,
+                    $user->tipo,
+                    $user->unidad_id,
+                    $user->id
                 ]
             );
-            foreach ($filas as $fila) {
-                $pid = $fila->partida_id;
-                if (!isset($agregado[$pid])) {
-                    $agregado[$pid] = ['ingresos' => 0, 'egresos' => 0, 'saldo' => 0];
-                }
-                $agregado[$pid]['ingresos'] += (float) $fila->ingresos;
-                $agregado[$pid]['egresos'] += (float) $fila->egresos;
-                $agregado[$pid]['saldo'] += (float) $fila->saldo;
-            }
-        }
-
-        $partidas = [];
-        $totales = ['ingresos' => 0, 'egresos' => 0, 'saldo' => 0];
-        foreach ($partidasOrden as $partida) {
-            $pid = $partida->id;
-            $ing = $agregado[$pid]['ingresos'] ?? 0;
-            $egr = $agregado[$pid]['egresos'] ?? 0;
-            $sal = $agregado[$pid]['saldo'] ?? 0;
-            $partidas[] = [
-                'partida' => [
-                    'id' => $partida->id,
-                    'nro_partida' => $partida->nro_partida,
-                    'nombre' => $partida->nombre,
-                ],
-                'ingresos' => $ing,
-                'egresos' => $egr,
-                'saldo' => $sal,
+            $totales = [
+                'ingresos' => 0,
+                'salidas' => 0,
+                'saldos' => 0
             ];
-            $totales['ingresos'] += $ing;
-            $totales['egresos'] += $egr;
-            $totales['saldo'] += $sal;
-        }
+            foreach ($filas as $f) {
+                $totales['ingresos'] += $f->ingresos;
+                $totales['salidas'] += $f->salidas;
+                $totales['saldos'] += $f->saldos;
+            }
 
-        return ['partidas' => $partidas, 'totales' => $totales];
+            $reporteResumen[] = [
+                'almacen' => ['id' => $almacen->id, 'nombre' => $almacen->nombre],
+                'partidas' => $filas,
+                'totales' => $totales
+            ];
+        }
+        return $reporteResumen;
     }
 
     /**
@@ -548,86 +583,218 @@ class ReporteController extends Controller
     private function r_bimestral_resumen_excel(array $reporteResumen, $texto_fecha)
     {
         $configuracion = \App\Models\Configuracion::first();
+
         $spreadsheet = new Spreadsheet();
         $spreadsheet->getProperties()
-            ->setCreator("ADMIN")->setLastModifiedBy('Administración')
-            ->setTitle('Bimestral Resumen')->setSubject('Bimestral Resumen')
-            ->setDescription('Bimestral Resumen')->setKeywords('PHPSpreadsheet')
+            ->setCreator("ADMIN")
+            ->setLastModifiedBy('Administración')
+            ->setTitle('Bimestral Resumen')
+            ->setSubject('Bimestral Resumen')
+            ->setDescription('Bimestral Resumen por almacén')
+            ->setKeywords('PHPSpreadsheet')
             ->setCategory('Listado');
-        $sheet = $spreadsheet->getActiveSheet();
+
         $spreadsheet->getDefaultStyle()->getFont()->setName('Arial');
 
-        $fila = 1;
-        if (file_exists(public_path() . '/imgs/' . $configuracion->logo)) {
-            $drawing = new \PhpOffice\PhpSpreadsheet\Worksheet\Drawing();
-            $drawing->setName('logo')->setDescription('logo');
-            $drawing->setPath(public_path() . '/imgs/' . $configuracion->logo);
-            $drawing->setCoordinates('A' . $fila)->setOffsetX(5)->setOffsetY(0)->setHeight(60);
-            $drawing->setWorksheet($sheet);
-        }
-        $fila = 2;
+        $contador = 0;
 
-        $sheet->setCellValue('A' . $fila, $configuracion->razon_social);
-        $sheet->mergeCells("A{$fila}:E{$fila}");
-        $sheet->getStyle("A{$fila}:E{$fila}")->getAlignment()->setHorizontal('center');
-        $sheet->getStyle("A{$fila}:E{$fila}")->applyFromArray($this->titulo);
-        $fila++;
-        $sheet->setCellValue('A' . $fila, "SALDOS FÍSICOS VALORADOS DE EXISTENCIAS DE ALMACENES");
-        $sheet->mergeCells("A{$fila}:E{$fila}");
-        $sheet->getStyle("A{$fila}:E{$fila}")->getAlignment()->setHorizontal('center');
-        $sheet->getStyle("A{$fila}:E{$fila}")->applyFromArray($this->titulo);
-        $fila++;
-        $sheet->setCellValue('A' . $fila, $texto_fecha);
-        $sheet->mergeCells("A{$fila}:E{$fila}");
-        $sheet->getStyle("A{$fila}:E{$fila}")->getAlignment()->setHorizontal('center');
-        $sheet->getStyle("A{$fila}:E{$fila}")->applyFromArray($this->titulo);
-        $fila++;
-        $fila++;
+        foreach ($reporteResumen as $resumen) {
+            $contador++;
 
-        $sheet->setCellValue('A' . $fila, 'PARTIDA');
-        $sheet->setCellValue('B' . $fila, 'DESCRIPCIÓN');
-        $sheet->setCellValue('C' . $fila, 'INGRESOS');
-        $sheet->setCellValue('D' . $fila, 'SALIDAS');
-        $sheet->setCellValue('E' . $fila, 'SALDOS');
-        $sheet->getStyle("A{$fila}:E{$fila}")->applyFromArray($this->headerTabla);
-        $fila++;
+            $partidas = $resumen['partidas'];
+            $totales  = $resumen['totales'];
+            $almacen  = $resumen['almacen'];
 
-        foreach ($reporteResumen['partidas'] as $item) {
-            $sheet->setCellValue('A' . $fila, $item['partida']['nro_partida']);
-            $sheet->setCellValue('B' . $fila, $item['partida']['nombre']);
-            $sheet->setCellValue('C' . $fila, $item['ingresos']);
-            $sheet->setCellValue('D' . $fila, $item['egresos']);
-            $sheet->setCellValue('E' . $fila, $item['saldo']);
-            $sheet->getStyle("A{$fila}:E{$fila}")->applyFromArray($this->bodyTabla);
-            $sheet->getStyle("A{$fila}:E{$fila}")->applyFromArray($this->celdaCenter);
+            if ($contador === 1) {
+                $sheet = $spreadsheet->getActiveSheet();
+            } else {
+                $sheet = $spreadsheet->createSheet();
+            }
+
+            $nombreHoja = $almacen['nombre'] ?? ('Almacen ' . $contador);
+
+            // Excel limita a 31 caracteres el nombre de hoja
+            $nombreHoja = mb_substr($nombreHoja, 0, 31);
+            $nombreHoja = str_replace(['\\', '/', '?', '*', ':', '[', ']'], '-', $nombreHoja);
+            $sheet->setTitle($nombreHoja);
+
+            $fila = 1;
+
+            // =========================
+            // LOGO
+            // =========================
+            if (!empty($configuracion->logo) && file_exists(public_path('imgs/' . $configuracion->logo))) {
+                $drawing = new \PhpOffice\PhpSpreadsheet\Worksheet\Drawing();
+                $drawing->setName('logo_' . $contador);
+                $drawing->setDescription('logo');
+                $drawing->setPath(public_path('imgs/' . $configuracion->logo));
+                $drawing->setCoordinates('A1');
+                $drawing->setOffsetX(5);
+                $drawing->setOffsetY(2);
+                $drawing->setHeight(55);
+                $drawing->setWorksheet($sheet);
+            }
+
+            $sheet->getRowDimension(1)->setRowHeight(42);
+
+            // =========================
+            // ENCABEZADO
+            // =========================
+            $sheet->setCellValue('A' . $fila, $configuracion->razon_social);
+            $sheet->mergeCells("A{$fila}:E{$fila}");
+            $sheet->getStyle("A{$fila}:E{$fila}")->applyFromArray($this->titulo);
+            $sheet->getStyle("A{$fila}:E{$fila}")->getAlignment()->setHorizontal(
+                \PhpOffice\PhpSpreadsheet\Style\Alignment::HORIZONTAL_CENTER
+            );
             $fila++;
+
+            $sheet->setCellValue('A' . $fila, 'SALDOS FÍSICOS VALORADOS DE EXISTENCIAS DE ALMACENES');
+            $sheet->mergeCells("A{$fila}:E{$fila}");
+            $sheet->getStyle("A{$fila}:E{$fila}")->applyFromArray($this->titulo);
+            $sheet->getStyle("A{$fila}:E{$fila}")->getAlignment()->setHorizontal(
+                \PhpOffice\PhpSpreadsheet\Style\Alignment::HORIZONTAL_CENTER
+            );
+            $fila++;
+
+            $sheet->setCellValue('A' . $fila, $texto_fecha);
+            $sheet->mergeCells("A{$fila}:E{$fila}");
+            $sheet->getStyle("A{$fila}:E{$fila}")->applyFromArray($this->titulo);
+            $sheet->getStyle("A{$fila}:E{$fila}")->getAlignment()->setHorizontal(
+                \PhpOffice\PhpSpreadsheet\Style\Alignment::HORIZONTAL_CENTER
+            );
+            $fila++;
+
+            $sheet->setCellValue('A' . $fila, $almacen['nombre'] ?? '');
+            $sheet->mergeCells("A{$fila}:E{$fila}");
+            $sheet->getStyle("A{$fila}:E{$fila}")->applyFromArray($this->titulo);
+            $sheet->getStyle("A{$fila}:E{$fila}")->getAlignment()->setHorizontal(
+                \PhpOffice\PhpSpreadsheet\Style\Alignment::HORIZONTAL_CENTER
+            );
+            $fila += 2;
+
+            // =========================
+            // CABECERA TABLA
+            // =========================
+            $sheet->setCellValue('A' . $fila, 'PARTIDA');
+            $sheet->setCellValue('B' . $fila, 'DESCRIPCIÓN');
+            $sheet->setCellValue('C' . $fila, 'INGRESOS');
+            $sheet->setCellValue('D' . $fila, 'SALIDAS');
+            $sheet->setCellValue('E' . $fila, 'SALDOS');
+
+            $sheet->getStyle("A{$fila}:E{$fila}")->applyFromArray($this->headerTabla);
+            $sheet->getStyle("A{$fila}:E{$fila}")->getAlignment()->setHorizontal(
+                \PhpOffice\PhpSpreadsheet\Style\Alignment::HORIZONTAL_CENTER
+            );
+            $fila++;
+
+            $filaInicioDetalle = $fila;
+
+            // =========================
+            // DETALLE
+            // =========================
+            foreach ($partidas as $p) {
+                $sheet->setCellValue('A' . $fila, $p->partida);
+                $sheet->setCellValue('B' . $fila, $p->descripcion);
+                $sheet->setCellValue('C' . $fila, (float)$p->ingresos);
+                $sheet->setCellValue('D' . $fila, (float)$p->salidas);
+                $sheet->setCellValue('E' . $fila, (float)$p->saldos);
+
+                $sheet->getStyle("A{$fila}:E{$fila}")->applyFromArray($this->bodyTabla);
+
+                $sheet->getStyle("A{$fila}")->getAlignment()->setHorizontal(
+                    \PhpOffice\PhpSpreadsheet\Style\Alignment::HORIZONTAL_CENTER
+                );
+                $sheet->getStyle("B{$fila}")->getAlignment()->setHorizontal(
+                    \PhpOffice\PhpSpreadsheet\Style\Alignment::HORIZONTAL_LEFT
+                );
+                $sheet->getStyle("C{$fila}:E{$fila}")->getAlignment()->setHorizontal(
+                    \PhpOffice\PhpSpreadsheet\Style\Alignment::HORIZONTAL_CENTER
+                );
+
+                $sheet->getStyle("C{$fila}:E{$fila}")
+                    ->getNumberFormat()
+                    ->setFormatCode('#,##0.00');
+
+                $fila++;
+            }
+
+            // =========================
+            // TOTALES
+            // =========================
+            $sheet->setCellValue('A' . $fila, 'TOTALES');
+            $sheet->mergeCells("A{$fila}:B{$fila}");
+            $sheet->setCellValue('C' . $fila, (float)$totales['ingresos']);
+            $sheet->setCellValue('D' . $fila, (float)$totales['salidas']);
+            $sheet->setCellValue('E' . $fila, (float)$totales['saldos']);
+
+            $sheet->getStyle("A{$fila}:E{$fila}")->applyFromArray($this->footerTabla);
+            $sheet->getStyle("A{$fila}:B{$fila}")->getAlignment()->setHorizontal(
+                \PhpOffice\PhpSpreadsheet\Style\Alignment::HORIZONTAL_RIGHT
+            );
+            $sheet->getStyle("C{$fila}:E{$fila}")
+                ->getNumberFormat()
+                ->setFormatCode('#,##0.00');
+
+            // Bordes del bloque de tabla
+            $sheet->getStyle("A" . ($filaInicioDetalle - 1) . ":E{$fila}")
+                ->getBorders()
+                ->getAllBorders()
+                ->setBorderStyle(\PhpOffice\PhpSpreadsheet\Style\Border::BORDER_THIN);
+
+            // =========================
+            // ANCHOS / AJUSTES
+            // =========================
+            $sheet->getColumnDimension('A')->setWidth(15);
+            $sheet->getColumnDimension('B')->setWidth(45);
+            $sheet->getColumnDimension('C')->setWidth(16);
+            $sheet->getColumnDimension('D')->setWidth(16);
+            $sheet->getColumnDimension('E')->setWidth(16);
+
+            foreach (range('A', 'E') as $columnID) {
+                $sheet->getStyle($columnID)->getAlignment()->setWrapText(true);
+            }
+
+            // =========================
+            // CONFIGURACIÓN DE IMPRESIÓN
+            // =========================
+            $sheet->getPageSetup()->setOrientation(
+                \PhpOffice\PhpSpreadsheet\Worksheet\PageSetup::ORIENTATION_LANDSCAPE
+            );
+
+            $sheet->getPageSetup()->setPaperSize(
+                \PhpOffice\PhpSpreadsheet\Worksheet\PageSetup::PAPERSIZE_LETTER
+            );
+
+            $sheet->getPageMargins()
+                ->setTop(0.4)
+                ->setRight(0.2)
+                ->setLeft(0.2)
+                ->setBottom(0.4)
+                ->setHeader(0.2)
+                ->setFooter(0.2);
+
+            $ultimaFila = $sheet->getHighestRow();
+            $sheet->getPageSetup()->setPrintArea("A1:E{$ultimaFila}");
+            $sheet->getPageSetup()->setFitToWidth(1);
+            $sheet->getPageSetup()->setFitToHeight(0);
+
+            // Repetir cabecera de tabla en caso de que una hoja se parta en varias páginas impresas
+            $filaCabeceraTabla = $filaInicioDetalle - 1;
+            $sheet->getPageSetup()->setRowsToRepeatAtTopByStartAndEnd($filaCabeceraTabla, $filaCabeceraTabla);
+
+            // Pie de página con numeración
+            $sheet->getHeaderFooter()->setOddFooter('&RPágina &P de &N');
         }
 
-        $tot = $reporteResumen['totales'];
-        $sheet->setCellValue('A' . $fila, 'TOTALES');
-        $sheet->mergeCells("A{$fila}:B{$fila}");
-        $sheet->setCellValue('C' . $fila, number_format($tot['ingresos'], 2, ".", ""));
-        $sheet->setCellValue('D' . $fila, number_format($tot['egresos'], 2, ".", ""));
-        $sheet->setCellValue('E' . $fila, number_format($tot['saldo'], 2, ".", ""));
-        $sheet->getStyle("A{$fila}:E{$fila}")->applyFromArray($this->footerTabla);
-
-        $sheet->getColumnDimension('A')->setWidth(15);
-        $sheet->getColumnDimension('B')->setWidth(23);
-        $sheet->getColumnDimension('C')->setWidth(15);
-        $sheet->getColumnDimension('D')->setWidth(15);
-        $sheet->getColumnDimension('E')->setWidth(15);
-        foreach (range('A', 'K') as $columnID) {
-            $sheet->getStyle($columnID)->getAlignment()->setWrapText(true);
-        }
-        $sheet->getPageSetup()->setOrientation(\PhpOffice\PhpSpreadsheet\Worksheet\PageSetup::ORIENTATION_LANDSCAPE);
-        $sheet->getPageMargins()->setTop(0.5)->setRight(0.1)->setLeft(0.1)->setBottom(0.1);
-        $sheet->getPageSetup()->setPrintArea('A:E')->setFitToWidth(1)->setFitToHeight(0);
+        $spreadsheet->setActiveSheetIndex(0);
 
         header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         header('Content-Disposition: attachment;filename="bimestral_resumen.xlsx"');
         header('Cache-Control: max-age=0');
+
         $writer = IOFactory::createWriter($spreadsheet, 'Xlsx');
         $writer->save('php://output');
+        exit;
     }
 
     /**
@@ -645,7 +812,9 @@ class ReporteController extends Controller
             );
 
             if ($user->tipo == 'EXTERNO') {
-                $filas = array_filter($filas, fn($f) =>
+                $filas = array_filter(
+                    $filas,
+                    fn($f) =>
                     $f->unidad_id == $user->unidad_id && $f->user_id == $user->id
                 );
                 $filas = array_values($filas);
@@ -655,10 +824,16 @@ class ReporteController extends Controller
                 continue;
             }
 
-            $tot = ['saldo_ant_cant' => 0, 'saldo_ant_total' => 0,
-                    'ingreso_cant'   => 0, 'ingreso_total'   => 0,
-                    'egreso_cant'    => 0, 'egreso_total'    => 0,
-                    'saldo_fin_cant' => 0, 'saldo_fin_total' => 0];
+            $tot = [
+                'saldo_ant_cant' => 0,
+                'saldo_ant_total' => 0,
+                'ingreso_cant'   => 0,
+                'ingreso_total'   => 0,
+                'egreso_cant'    => 0,
+                'egreso_total'    => 0,
+                'saldo_fin_cant' => 0,
+                'saldo_fin_total' => 0
+            ];
 
             $grouped = [];
             foreach ($filas as $fila) {
@@ -673,10 +848,16 @@ class ReporteController extends Controller
 
             $partidas_data = [];
             foreach ($grouped as $pid => $gdata) {
-                $sub = ['saldo_ant_cant' => 0, 'saldo_ant_total' => 0,
-                        'ingreso_cant'   => 0, 'ingreso_total'   => 0,
-                        'egreso_cant'    => 0, 'egreso_total'    => 0,
-                        'saldo_fin_cant' => 0, 'saldo_fin_total' => 0];
+                $sub = [
+                    'saldo_ant_cant' => 0,
+                    'saldo_ant_total' => 0,
+                    'ingreso_cant'   => 0,
+                    'ingreso_total'   => 0,
+                    'egreso_cant'    => 0,
+                    'egreso_total'    => 0,
+                    'saldo_fin_cant' => 0,
+                    'saldo_fin_total' => 0
+                ];
 
                 foreach ($gdata['filas'] as $f) {
                     $sub['saldo_ant_cant']  += (float) $f->saldo_anterior_cantidad;
@@ -713,195 +894,284 @@ class ReporteController extends Controller
      */
     private function buildCuatrimestralResumenReporteData($almacens, $fecha_ini, $fecha_fin, $donacion = 'NO'): array
     {
-        $user = Auth::user();
-        $partidasOrden = Partida::orderBy('nro_partida')->get();
-        $agregado = [];
-
+        $user   = Auth::user();
+        $reporteResumen = [];
         foreach ($almacens as $almacen) {
             $filas = \Illuminate\Support\Facades\DB::select(
-                'CALL sp_reporte_resumen(?, ?, ?, ?, ?, ?, ?, ?)',
+                'CALL sp_reporte_resumen(?, ?, ?, ?, ?, ?, ?)',
                 [
                     $fecha_ini,
                     $fecha_fin,
-                    $donacion,
-                    $almacen->grupo,
                     $almacen->id,
-                    $user->tipo ?? '',
-                    $user->unidad_id ?? 0,
-                    $user->id ?? 0,
+                    $donacion,
+                    $user->tipo,
+                    $user->unidad_id,
+                    $user->id
                 ]
             );
-            foreach ($filas as $fila) {
-                $pid = $fila->partida_id;
-                if (!isset($agregado[$pid])) {
-                    $agregado[$pid] = ['ingresos' => 0, 'egresos' => 0, 'saldo' => 0];
-                }
-                $agregado[$pid]['ingresos'] += (float) $fila->ingresos;
-                $agregado[$pid]['egresos'] += (float) $fila->egresos;
-                $agregado[$pid]['saldo'] += (float) $fila->saldo;
-            }
-        }
-
-        $partidas = [];
-        $totales = ['ingresos' => 0, 'egresos' => 0, 'saldo' => 0];
-        foreach ($partidasOrden as $partida) {
-            $pid = $partida->id;
-            $ing = $agregado[$pid]['ingresos'] ?? 0;
-            $egr = $agregado[$pid]['egresos'] ?? 0;
-            $sal = $agregado[$pid]['saldo'] ?? 0;
-            $partidas[] = [
-                'partida' => [
-                    'id' => $partida->id,
-                    'nro_partida' => $partida->nro_partida,
-                    'nombre' => $partida->nombre,
-                ],
-                'ingresos' => $ing,
-                'egresos' => $egr,
-                'saldo' => $sal,
+            $totales = [
+                'ingresos' => 0,
+                'salidas' => 0,
+                'saldos' => 0
             ];
-            $totales['ingresos'] += $ing;
-            $totales['egresos'] += $egr;
-            $totales['saldo'] += $sal;
-        }
+            foreach ($filas as $f) {
+                $totales['ingresos'] += $f->ingresos;
+                $totales['salidas'] += $f->salidas;
+                $totales['saldos'] += $f->saldos;
+            }
 
-        return ['partidas' => $partidas, 'totales' => $totales];
+            $reporteResumen[] = [
+                'almacen' => ['id' => $almacen->id, 'nombre' => $almacen->nombre],
+                'partidas' => $filas,
+                'totales' => $totales
+            ];
+        }
+        return $reporteResumen;
     }
 
     /**
      * Excel cuatrimestral detalle (datos precalculados por SP).
      */
+
     private function r_cuatrimestral_detalle_excel(array $reporte, $fecha_ini, $fecha_fin, $texto_fecha)
     {
         $configuracion = \App\Models\Configuracion::first();
         $tituloReporte = 'INVENTARIO FÍSICO VALORADO DE BIENES Y CONSUMO';
+
         $spreadsheet = new Spreadsheet();
         $spreadsheet->getProperties()
-            ->setCreator("ADMIN")->setLastModifiedBy('Administración')
-            ->setTitle('Cuatrimestral Detalle')->setSubject('Cuatrimestral Detalle')
-            ->setDescription('Cuatrimestral Detalle')->setKeywords('PHPSpreadsheet')
+            ->setCreator("ADMIN")
+            ->setLastModifiedBy('Administración')
+            ->setTitle('Cuatrimestral Detalle')
+            ->setSubject('Cuatrimestral Detalle')
+            ->setDescription('Cuatrimestral Detalle')
+            ->setKeywords('PHPSpreadsheet')
             ->setCategory('Listado');
-        $sheet = $spreadsheet->getActiveSheet();
-        $spreadsheet->getDefaultStyle()->getFont()->setName('Arial');
 
-        $fila = 1;
-        if (file_exists(public_path() . '/imgs/' . $configuracion->logo)) {
-            $drawing = new \PhpOffice\PhpSpreadsheet\Worksheet\Drawing();
-            $drawing->setName('logo')->setDescription('logo');
-            $drawing->setPath(public_path() . '/imgs/' . $configuracion->logo);
-            $drawing->setCoordinates('A1')->setOffsetX(5)->setOffsetY(0)->setHeight(60);
-            $drawing->setWorksheet($sheet);
-        }
-        $fila = 2;
+        $spreadsheet->getDefaultStyle()->getFont()->setName('Arial');
 
         $txt_sd = $fecha_ini ? 'SALDO AL ' . date('d/m/Y', strtotime($fecha_ini)) : 'SALDO ANTERIOR';
         $txt_sf = $fecha_fin ? 'SALDO AL ' . date('d/m/Y', strtotime($fecha_fin)) : 'SALDO';
 
-        foreach ($reporte as $bloque) {
-            foreach ([
-                $configuracion->razon_social,
-                $tituloReporte,
-                $bloque['almacen']['nombre'],
-                $texto_fecha,
-            ] as $txt) {
+        foreach ($reporte as $index => $bloque) {
+            // Crear o seleccionar hoja por almacén
+            if ($index === 0) {
+                $sheet = $spreadsheet->getActiveSheet();
+            } else {
+                $sheet = $spreadsheet->createSheet($index);
+            }
+
+            $nombreHoja = mb_substr($bloque['almacen']['nombre'], 0, 31);
+            $sheet->setTitle($nombreHoja);
+
+            $fila = 1;
+
+            // Logo por hoja
+            if (file_exists(public_path() . '/imgs/' . $configuracion->logo)) {
+                $drawing = new \PhpOffice\PhpSpreadsheet\Worksheet\Drawing();
+                $drawing->setName('logo')
+                    ->setDescription('logo')
+                    ->setPath(public_path() . '/imgs/' . $configuracion->logo)
+                    ->setCoordinates('A1')
+                    ->setOffsetX(5)
+                    ->setOffsetY(0)
+                    ->setHeight(60);
+                $drawing->setWorksheet($sheet);
+            }
+
+            $fila = 2;
+
+            // Encabezado
+            foreach (
+                [
+                    $configuracion->razon_social,
+                    $tituloReporte,
+                    $bloque['almacen']['nombre'],
+                    $texto_fecha,
+                ] as $txt
+            ) {
                 $sheet->setCellValue('A' . $fila, $txt);
                 $sheet->mergeCells("A{$fila}:Q{$fila}");
-                $sheet->getStyle("A{$fila}:Q{$fila}")->getAlignment()->setHorizontal('center');
+                $sheet->getStyle("A{$fila}:Q{$fila}")
+                    ->getAlignment()
+                    ->setHorizontal(\PhpOffice\PhpSpreadsheet\Style\Alignment::HORIZONTAL_CENTER);
                 $sheet->getStyle("A{$fila}:Q{$fila}")->applyFromArray($this->titulo);
                 $fila++;
             }
-            $fila++; $fila++;
 
-            $sheet->setCellValue('A' . $fila, 'N°');     $sheet->mergeCells("A{$fila}:A" . ($fila+1));
-            $sheet->setCellValue('B' . $fila, 'CÓDIGO'); $sheet->mergeCells("B{$fila}:B" . ($fila+1));
-            $sheet->setCellValue('C' . $fila, 'UNIDAD'); $sheet->mergeCells("C{$fila}:C" . ($fila+1));
-            $sheet->setCellValue('D' . $fila, 'DESCRIPCIÓN'); $sheet->mergeCells("D{$fila}:D" . ($fila+1));
-            $sheet->setCellValue('E' . $fila, $txt_sd);  $sheet->mergeCells("E{$fila}:G{$fila}");
-            $sheet->setCellValue('H' . $fila, 'FECHA INGRESO'); $sheet->mergeCells("H{$fila}:H" . ($fila+1));
-            $sheet->setCellValue('I' . $fila, 'INGRESO ALMACENES'); $sheet->mergeCells("I{$fila}:K{$fila}");
-            $sheet->setCellValue('L' . $fila, 'SALIDA ALMACENES'); $sheet->mergeCells("L{$fila}:N{$fila}");
-            $sheet->setCellValue('O' . $fila, $txt_sf);  $sheet->mergeCells("O{$fila}:Q{$fila}");
+            $fila++;
+            $fila++;
+
+            // Cabecera de tabla
+            $sheet->setCellValue('A' . $fila, 'N°');
+            $sheet->mergeCells("A{$fila}:A" . ($fila + 1));
+
+            $sheet->setCellValue('B' . $fila, 'CÓDIGO');
+            $sheet->mergeCells("B{$fila}:B" . ($fila + 1));
+
+            $sheet->setCellValue('C' . $fila, 'UNIDAD');
+            $sheet->mergeCells("C{$fila}:C" . ($fila + 1));
+
+            $sheet->setCellValue('D' . $fila, 'DESCRIPCIÓN');
+            $sheet->mergeCells("D{$fila}:D" . ($fila + 1));
+
+            $sheet->setCellValue('E' . $fila, $txt_sd);
+            $sheet->mergeCells("E{$fila}:G{$fila}");
+
+            $sheet->setCellValue('H' . $fila, 'FECHA INGRESO');
+            $sheet->mergeCells("H{$fila}:H" . ($fila + 1));
+
+            $sheet->setCellValue('I' . $fila, 'INGRESO ALMACENES');
+            $sheet->mergeCells("I{$fila}:K{$fila}");
+
+            $sheet->setCellValue('L' . $fila, 'SALIDA ALMACENES');
+            $sheet->mergeCells("L{$fila}:N{$fila}");
+
+            $sheet->setCellValue('O' . $fila, $txt_sf);
+            $sheet->mergeCells("O{$fila}:Q{$fila}");
+
             $sheet->getStyle("A{$fila}:Q{$fila}")->applyFromArray($this->headerTabla);
             $fila++;
-            foreach (['E'=>'CANT.','F'=>'C/U','G'=>'TOTAL BS.','I'=>'CANT.','J'=>'C/U','K'=>'TOTAL BS.','L'=>'CANT.','M'=>'C/U','N'=>'TOTAL BS.','O'=>'CANT.','P'=>'C/U','Q'=>'TOTAL BS.'] as $col => $lbl) {
+
+            foreach (
+                [
+                    'E' => 'CANT.',
+                    'F' => 'C/U',
+                    'G' => 'TOTAL BS.',
+                    'I' => 'CANT.',
+                    'J' => 'C/U',
+                    'K' => 'TOTAL BS.',
+                    'L' => 'CANT.',
+                    'M' => 'C/U',
+                    'N' => 'TOTAL BS.',
+                    'O' => 'CANT.',
+                    'P' => 'C/U',
+                    'Q' => 'TOTAL BS.',
+                ] as $col => $lbl
+            ) {
                 $sheet->setCellValue($col . $fila, $lbl);
             }
+
             $sheet->getStyle("E{$fila}:Q{$fila}")->applyFromArray($this->headerTabla);
             $fila++;
 
+            // Detalle
             $cont = 1;
             foreach ($bloque['partidas'] as $pdata) {
+                // Encabezado de partida
                 $sheet->setCellValue('A' . $fila, 'PARTIDA N° ' . $pdata['partida']['nro_partida']);
                 $sheet->mergeCells("A{$fila}:D{$fila}");
                 $sheet->getStyle("A{$fila}:Q{$fila}")->applyFromArray($this->bg1);
                 $sheet->getStyle("A{$fila}:Q{$fila}")->applyFromArray($this->bodyTabla);
                 $fila++;
+
                 foreach ($pdata['filas'] as $f) {
                     $sheet->setCellValue('A' . $fila, $cont++);
                     $sheet->setCellValue('B' . $fila, $f->item_abreviatura);
                     $sheet->setCellValue('C' . $fila, $f->unidad_medida_nombre);
                     $sheet->setCellValue('D' . $fila, $f->item_nombre);
+
                     $sheet->setCellValue('E' . $fila, $f->saldo_anterior_cantidad);
                     $sheet->setCellValue('F' . $fila, $f->saldo_anterior_costo);
                     $sheet->setCellValue('G' . $fila, $f->saldo_anterior_total);
+
                     $sheet->setCellValue('H' . $fila, $f->fecha_ingreso);
+
                     $sheet->setCellValue('I' . $fila, $f->ingreso_rango_cantidad);
                     $sheet->setCellValue('J' . $fila, $f->ingreso_rango_costo);
                     $sheet->setCellValue('K' . $fila, $f->ingreso_rango_total);
+
                     $sheet->setCellValue('L' . $fila, $f->egreso_rango_cantidad);
                     $sheet->setCellValue('M' . $fila, $f->egreso_rango_costo);
                     $sheet->setCellValue('N' . $fila, $f->egreso_rango_total);
+
                     $sheet->setCellValue('O' . $fila, $f->saldo_final_cantidad);
                     $sheet->setCellValue('P' . $fila, $f->saldo_final_costo);
                     $sheet->setCellValue('Q' . $fila, $f->saldo_final_total);
+
                     $sheet->getStyle("A{$fila}:Q{$fila}")->applyFromArray($this->bodyTabla);
                     $sheet->getStyle("E{$fila}:Q{$fila}")->applyFromArray($this->celdaCenter);
                     $fila++;
                 }
+
+                // Subtotal de partida
                 $sub = $pdata['subtotal'];
                 $sheet->setCellValue('A' . $fila, 'TOTAL PARTIDA N° ' . $pdata['partida']['nro_partida']);
                 $sheet->mergeCells("A{$fila}:D{$fila}");
-                $sheet->setCellValue('E' . $fila, number_format($sub['saldo_ant_cant'],  2, '.', ''));
+
+                $sheet->setCellValue('E' . $fila, number_format($sub['saldo_ant_cant'], 2, '.', ''));
                 $sheet->setCellValue('G' . $fila, number_format($sub['saldo_ant_total'], 2, '.', ''));
-                $sheet->setCellValue('I' . $fila, number_format($sub['ingreso_cant'],    2, '.', ''));
-                $sheet->setCellValue('K' . $fila, number_format($sub['ingreso_total'],   2, '.', ''));
-                $sheet->setCellValue('L' . $fila, number_format($sub['egreso_cant'],     2, '.', ''));
-                $sheet->setCellValue('N' . $fila, number_format($sub['egreso_total'],    2, '.', ''));
-                $sheet->setCellValue('O' . $fila, number_format($sub['saldo_fin_cant'],  2, '.', ''));
+                $sheet->setCellValue('I' . $fila, number_format($sub['ingreso_cant'], 2, '.', ''));
+                $sheet->setCellValue('K' . $fila, number_format($sub['ingreso_total'], 2, '.', ''));
+                $sheet->setCellValue('L' . $fila, number_format($sub['egreso_cant'], 2, '.', ''));
+                $sheet->setCellValue('N' . $fila, number_format($sub['egreso_total'], 2, '.', ''));
+                $sheet->setCellValue('O' . $fila, number_format($sub['saldo_fin_cant'], 2, '.', ''));
                 $sheet->setCellValue('Q' . $fila, number_format($sub['saldo_fin_total'], 2, '.', ''));
+
                 $sheet->getStyle("A{$fila}:Q{$fila}")->applyFromArray($this->footerTabla);
+                $sheet->getStyle("A{$fila}:Q{$fila}")
+                    ->getFill()
+                    ->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
+                    ->getStartColor()
+                    ->setRGB('4F81BD');
+
                 $fila++;
             }
+
+            // Total general
             $tot = $bloque['totales'];
             $sheet->setCellValue('A' . $fila, 'TOTAL GENERAL');
             $sheet->mergeCells("A{$fila}:D{$fila}");
-            $sheet->setCellValue('E' . $fila, number_format($tot['saldo_ant_cant'],  2, '.', ''));
+
+            $sheet->setCellValue('E' . $fila, number_format($tot['saldo_ant_cant'], 2, '.', ''));
             $sheet->setCellValue('G' . $fila, number_format($tot['saldo_ant_total'], 2, '.', ''));
-            $sheet->setCellValue('I' . $fila, number_format($tot['ingreso_cant'],    2, '.', ''));
-            $sheet->setCellValue('K' . $fila, number_format($tot['ingreso_total'],   2, '.', ''));
-            $sheet->setCellValue('L' . $fila, number_format($tot['egreso_cant'],     2, '.', ''));
-            $sheet->setCellValue('N' . $fila, number_format($tot['egreso_total'],    2, '.', ''));
-            $sheet->setCellValue('O' . $fila, number_format($tot['saldo_fin_cant'],  2, '.', ''));
+            $sheet->setCellValue('I' . $fila, number_format($tot['ingreso_cant'], 2, '.', ''));
+            $sheet->setCellValue('K' . $fila, number_format($tot['ingreso_total'], 2, '.', ''));
+            $sheet->setCellValue('L' . $fila, number_format($tot['egreso_cant'], 2, '.', ''));
+            $sheet->setCellValue('N' . $fila, number_format($tot['egreso_total'], 2, '.', ''));
+            $sheet->setCellValue('O' . $fila, number_format($tot['saldo_fin_cant'], 2, '.', ''));
             $sheet->setCellValue('Q' . $fila, number_format($tot['saldo_fin_total'], 2, '.', ''));
+
             $sheet->getStyle("A{$fila}:Q{$fila}")->applyFromArray($this->footerTabla);
-            $fila++; $fila++; $fila++; $fila++;
+            $sheet->getStyle("A{$fila}:Q{$fila}")
+                ->getFill()
+                ->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
+                ->getStartColor()
+                ->setRGB('FFD966');
+
+            // Configuración por hoja
+            $sheet->getColumnDimension('A')->setWidth(6);
+            $sheet->getColumnDimension('B')->setWidth(20);
+            $sheet->getColumnDimension('C')->setWidth(12);
+            $sheet->getColumnDimension('D')->setWidth(30);
+
+            foreach (range('E', 'Q') as $col) {
+                $sheet->getColumnDimension($col)->setWidth(12);
+            }
+
+            foreach (range('A', 'Q') as $col) {
+                $sheet->getStyle($col)->getAlignment()->setWrapText(true);
+            }
+
+            $sheet->getPageSetup()->setOrientation(\PhpOffice\PhpSpreadsheet\Worksheet\PageSetup::ORIENTATION_LANDSCAPE);
+            $sheet->getPageMargins()
+                ->setTop(0.5)
+                ->setRight(0.1)
+                ->setLeft(0.1)
+                ->setBottom(0.1);
+
+            $sheet->getPageSetup()
+                ->setPrintArea('A:Q')
+                ->setFitToWidth(1)
+                ->setFitToHeight(0);
         }
 
-        $sheet->getColumnDimension('A')->setWidth(6);
-        $sheet->getColumnDimension('B')->setWidth(20);
-        $sheet->getColumnDimension('C')->setWidth(12);
-        $sheet->getColumnDimension('D')->setWidth(30);
-        foreach (range('E', 'Q') as $col) {
-            $sheet->getColumnDimension($col)->setWidth(12);
-        }
-        foreach (range('A', 'Q') as $col) {
-            $sheet->getStyle($col)->getAlignment()->setWrapText(true);
-        }
-        $sheet->getPageSetup()->setOrientation(\PhpOffice\PhpSpreadsheet\Worksheet\PageSetup::ORIENTATION_LANDSCAPE);
-        $sheet->getPageMargins()->setTop(0.5)->setRight(0.1)->setLeft(0.1)->setBottom(0.1);
-        $sheet->getPageSetup()->setPrintArea('A:Q')->setFitToWidth(1)->setFitToHeight(0);
+        $spreadsheet->setActiveSheetIndex(0);
+
         header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         header('Content-Disposition: attachment;filename="cuatrimestral_detalle.xlsx"');
         header('Cache-Control: max-age=0');
+
         $writer = IOFactory::createWriter($spreadsheet, 'Xlsx');
         $writer->save('php://output');
     }
@@ -912,79 +1182,219 @@ class ReporteController extends Controller
     private function r_cuatrimestral_resumen_excel(array $reporteResumen, $texto_fecha)
     {
         $configuracion = \App\Models\Configuracion::first();
+
         $spreadsheet = new Spreadsheet();
         $spreadsheet->getProperties()
-            ->setCreator("ADMIN")->setLastModifiedBy('Administración')
-            ->setTitle('Cuatrimestral Resumen')->setSubject('Cuatrimestral Resumen')
-            ->setDescription('Cuatrimestral Resumen')->setKeywords('PHPSpreadsheet')
+            ->setCreator("ADMIN")
+            ->setLastModifiedBy('Administración')
+            ->setTitle('Cuatrimestral Resumen')
+            ->setSubject('Cuatrimestral Resumen')
+            ->setDescription('Cuatrimestral Resumen por almacén')
+            ->setKeywords('PHPSpreadsheet')
             ->setCategory('Listado');
-        $sheet = $spreadsheet->getActiveSheet();
+
         $spreadsheet->getDefaultStyle()->getFont()->setName('Arial');
 
-        $fila = 1;
-        if (file_exists(public_path() . '/imgs/' . $configuracion->logo)) {
-            $drawing = new \PhpOffice\PhpSpreadsheet\Worksheet\Drawing();
-            $drawing->setName('logo')->setDescription('logo');
-            $drawing->setPath(public_path() . '/imgs/' . $configuracion->logo);
-            $drawing->setCoordinates('A' . $fila)->setOffsetX(5)->setOffsetY(0)->setHeight(60);
-            $drawing->setWorksheet($sheet);
-        }
-        $fila = 2;
-        $sheet->setCellValue('A' . $fila, $configuracion->razon_social);
-        $sheet->mergeCells("A{$fila}:E{$fila}");
-        $sheet->getStyle("A{$fila}:E{$fila}")->getAlignment()->setHorizontal('center');
-        $sheet->getStyle("A{$fila}:E{$fila}")->applyFromArray($this->titulo);
-        $fila++;
-        $sheet->setCellValue('A' . $fila, "INVENTARIO FÍSICO VALORADO DE BIENES Y CONSUMO");
-        $sheet->mergeCells("A{$fila}:E{$fila}");
-        $sheet->getStyle("A{$fila}:E{$fila}")->getAlignment()->setHorizontal('center');
-        $sheet->getStyle("A{$fila}:E{$fila}")->applyFromArray($this->titulo);
-        $fila++;
-        $sheet->setCellValue('A' . $fila, $texto_fecha);
-        $sheet->mergeCells("A{$fila}:E{$fila}");
-        $sheet->getStyle("A{$fila}:E{$fila}")->getAlignment()->setHorizontal('center');
-        $sheet->getStyle("A{$fila}:E{$fila}")->applyFromArray($this->titulo);
-        $fila++; $fila++;
-        $sheet->setCellValue('A' . $fila, 'PARTIDA');
-        $sheet->setCellValue('B' . $fila, 'DESCRIPCIÓN');
-        $sheet->setCellValue('C' . $fila, 'INGRESOS');
-        $sheet->setCellValue('D' . $fila, 'SALIDAS');
-        $sheet->setCellValue('E' . $fila, 'SALDOS');
-        $sheet->getStyle("A{$fila}:E{$fila}")->applyFromArray($this->headerTabla);
-        $fila++;
-        foreach ($reporteResumen['partidas'] as $item) {
-            $sheet->setCellValue('A' . $fila, $item['partida']['nro_partida']);
-            $sheet->setCellValue('B' . $fila, $item['partida']['nombre']);
-            $sheet->setCellValue('C' . $fila, $item['ingresos']);
-            $sheet->setCellValue('D' . $fila, $item['egresos']);
-            $sheet->setCellValue('E' . $fila, $item['saldo']);
-            $sheet->getStyle("A{$fila}:E{$fila}")->applyFromArray($this->bodyTabla);
-            $sheet->getStyle("A{$fila}:E{$fila}")->applyFromArray($this->celdaCenter);
+        $contador = 0;
+
+        foreach ($reporteResumen as $resumen) {
+            $contador++;
+
+            $partidas = $resumen['partidas'];
+            $totales  = $resumen['totales'];
+            $almacen  = $resumen['almacen'];
+
+            if ($contador === 1) {
+                $sheet = $spreadsheet->getActiveSheet();
+            } else {
+                $sheet = $spreadsheet->createSheet();
+            }
+
+            $nombreHoja = $almacen['nombre'] ?? ('Almacen ' . $contador);
+
+            // Excel limita a 31 caracteres el nombre de hoja
+            $nombreHoja = mb_substr($nombreHoja, 0, 31);
+            $nombreHoja = str_replace(['\\', '/', '?', '*', ':', '[', ']'], '-', $nombreHoja);
+            $sheet->setTitle($nombreHoja);
+
+            $fila = 1;
+
+            // =========================
+            // LOGO
+            // =========================
+            if (!empty($configuracion->logo) && file_exists(public_path('imgs/' . $configuracion->logo))) {
+                $drawing = new \PhpOffice\PhpSpreadsheet\Worksheet\Drawing();
+                $drawing->setName('logo_' . $contador);
+                $drawing->setDescription('logo');
+                $drawing->setPath(public_path('imgs/' . $configuracion->logo));
+                $drawing->setCoordinates('A1');
+                $drawing->setOffsetX(5);
+                $drawing->setOffsetY(2);
+                $drawing->setHeight(55);
+                $drawing->setWorksheet($sheet);
+            }
+
+            $sheet->getRowDimension(1)->setRowHeight(42);
+
+            // =========================
+            // ENCABEZADO
+            // =========================
+            $sheet->setCellValue('A' . $fila, $configuracion->razon_social);
+            $sheet->mergeCells("A{$fila}:E{$fila}");
+            $sheet->getStyle("A{$fila}:E{$fila}")->applyFromArray($this->titulo);
+            $sheet->getStyle("A{$fila}:E{$fila}")->getAlignment()->setHorizontal(
+                \PhpOffice\PhpSpreadsheet\Style\Alignment::HORIZONTAL_CENTER
+            );
             $fila++;
+
+            $sheet->setCellValue('A' . $fila, 'INVENTARIO FÍSICO VALORADO DE BIENES Y CONSUMO');
+            $sheet->mergeCells("A{$fila}:E{$fila}");
+            $sheet->getStyle("A{$fila}:E{$fila}")->applyFromArray($this->titulo);
+            $sheet->getStyle("A{$fila}:E{$fila}")->getAlignment()->setHorizontal(
+                \PhpOffice\PhpSpreadsheet\Style\Alignment::HORIZONTAL_CENTER
+            );
+            $fila++;
+
+            $sheet->setCellValue('A' . $fila, $texto_fecha);
+            $sheet->mergeCells("A{$fila}:E{$fila}");
+            $sheet->getStyle("A{$fila}:E{$fila}")->applyFromArray($this->titulo);
+            $sheet->getStyle("A{$fila}:E{$fila}")->getAlignment()->setHorizontal(
+                \PhpOffice\PhpSpreadsheet\Style\Alignment::HORIZONTAL_CENTER
+            );
+            $fila++;
+
+            $sheet->setCellValue('A' . $fila, $almacen['nombre'] ?? '');
+            $sheet->mergeCells("A{$fila}:E{$fila}");
+            $sheet->getStyle("A{$fila}:E{$fila}")->applyFromArray($this->titulo);
+            $sheet->getStyle("A{$fila}:E{$fila}")->getAlignment()->setHorizontal(
+                \PhpOffice\PhpSpreadsheet\Style\Alignment::HORIZONTAL_CENTER
+            );
+            $fila += 2;
+
+            // =========================
+            // CABECERA TABLA
+            // =========================
+            $sheet->setCellValue('A' . $fila, 'PARTIDA');
+            $sheet->setCellValue('B' . $fila, 'DESCRIPCIÓN');
+            $sheet->setCellValue('C' . $fila, 'INGRESOS');
+            $sheet->setCellValue('D' . $fila, 'SALIDAS');
+            $sheet->setCellValue('E' . $fila, 'SALDOS');
+
+            $sheet->getStyle("A{$fila}:E{$fila}")->applyFromArray($this->headerTabla);
+            $sheet->getStyle("A{$fila}:E{$fila}")->getAlignment()->setHorizontal(
+                \PhpOffice\PhpSpreadsheet\Style\Alignment::HORIZONTAL_CENTER
+            );
+            $fila++;
+
+            $filaInicioDetalle = $fila;
+
+            // =========================
+            // DETALLE
+            // =========================
+            foreach ($partidas as $p) {
+                // buildCuatrimestralResumenReporteData devuelve objetos del SP
+                $sheet->setCellValue('A' . $fila, $p->partida ?? '');
+                $sheet->setCellValue('B' . $fila, $p->descripcion ?? '');
+                $sheet->setCellValue('C' . $fila, (float)($p->ingresos ?? 0));
+                $sheet->setCellValue('D' . $fila, (float)($p->salidas ?? 0));
+                $sheet->setCellValue('E' . $fila, (float)($p->saldos ?? 0));
+
+                $sheet->getStyle("A{$fila}:E{$fila}")->applyFromArray($this->bodyTabla);
+
+                $sheet->getStyle("A{$fila}")->getAlignment()->setHorizontal(
+                    \PhpOffice\PhpSpreadsheet\Style\Alignment::HORIZONTAL_CENTER
+                );
+                $sheet->getStyle("B{$fila}")->getAlignment()->setHorizontal(
+                    \PhpOffice\PhpSpreadsheet\Style\Alignment::HORIZONTAL_LEFT
+                );
+                $sheet->getStyle("C{$fila}:E{$fila}")->getAlignment()->setHorizontal(
+                    \PhpOffice\PhpSpreadsheet\Style\Alignment::HORIZONTAL_CENTER
+                );
+
+                $sheet->getStyle("C{$fila}:E{$fila}")
+                    ->getNumberFormat()
+                    ->setFormatCode('#,##0.00');
+
+                $fila++;
+            }
+
+            // =========================
+            // TOTALES
+            // =========================
+            $sheet->setCellValue('A' . $fila, 'TOTALES');
+            $sheet->mergeCells("A{$fila}:B{$fila}");
+            $sheet->setCellValue('C' . $fila, (float)($totales['ingresos'] ?? 0));
+            $sheet->setCellValue('D' . $fila, (float)($totales['salidas'] ?? 0));
+            $sheet->setCellValue('E' . $fila, (float)($totales['saldos'] ?? 0));
+
+            $sheet->getStyle("A{$fila}:E{$fila}")->applyFromArray($this->footerTabla);
+            $sheet->getStyle("A{$fila}:B{$fila}")->getAlignment()->setHorizontal(
+                \PhpOffice\PhpSpreadsheet\Style\Alignment::HORIZONTAL_RIGHT
+            );
+            $sheet->getStyle("C{$fila}:E{$fila}")
+                ->getNumberFormat()
+                ->setFormatCode('#,##0.00');
+
+            // Bordes del bloque de tabla
+            $sheet->getStyle("A" . ($filaInicioDetalle - 1) . ":E{$fila}")
+                ->getBorders()
+                ->getAllBorders()
+                ->setBorderStyle(\PhpOffice\PhpSpreadsheet\Style\Border::BORDER_THIN);
+
+            // =========================
+            // ANCHOS / AJUSTES
+            // =========================
+            $sheet->getColumnDimension('A')->setWidth(15);
+            $sheet->getColumnDimension('B')->setWidth(45);
+            $sheet->getColumnDimension('C')->setWidth(16);
+            $sheet->getColumnDimension('D')->setWidth(16);
+            $sheet->getColumnDimension('E')->setWidth(16);
+
+            foreach (range('A', 'E') as $columnID) {
+                $sheet->getStyle($columnID)->getAlignment()->setWrapText(true);
+            }
+
+            // =========================
+            // CONFIGURACIÓN DE IMPRESIÓN
+            // =========================
+            $sheet->getPageSetup()->setOrientation(
+                \PhpOffice\PhpSpreadsheet\Worksheet\PageSetup::ORIENTATION_LANDSCAPE
+            );
+
+            $sheet->getPageSetup()->setPaperSize(
+                \PhpOffice\PhpSpreadsheet\Worksheet\PageSetup::PAPERSIZE_LETTER
+            );
+
+            $sheet->getPageMargins()
+                ->setTop(0.4)
+                ->setRight(0.2)
+                ->setLeft(0.2)
+                ->setBottom(0.4)
+                ->setHeader(0.2)
+                ->setFooter(0.2);
+
+            $ultimaFila = $sheet->getHighestRow();
+            $sheet->getPageSetup()->setPrintArea("A1:E{$ultimaFila}");
+            $sheet->getPageSetup()->setFitToWidth(1);
+            $sheet->getPageSetup()->setFitToHeight(0);
+
+            // Repetir cabecera de tabla si la impresión ocupa más de una página
+            $filaCabeceraTabla = $filaInicioDetalle - 1;
+            $sheet->getPageSetup()->setRowsToRepeatAtTopByStartAndEnd($filaCabeceraTabla, $filaCabeceraTabla);
+
+            // Pie de página con numeración
+            $sheet->getHeaderFooter()->setOddFooter('&RPágina &P de &N');
         }
-        $tot = $reporteResumen['totales'];
-        $sheet->setCellValue('A' . $fila, 'TOTALES');
-        $sheet->mergeCells("A{$fila}:B{$fila}");
-        $sheet->setCellValue('C' . $fila, number_format($tot['ingresos'], 2, ".", ""));
-        $sheet->setCellValue('D' . $fila, number_format($tot['egresos'], 2, ".", ""));
-        $sheet->setCellValue('E' . $fila, number_format($tot['saldo'], 2, ".", ""));
-        $sheet->getStyle("A{$fila}:E{$fila}")->applyFromArray($this->footerTabla);
-        $sheet->getColumnDimension('A')->setWidth(15);
-        $sheet->getColumnDimension('B')->setWidth(23);
-        $sheet->getColumnDimension('C')->setWidth(15);
-        $sheet->getColumnDimension('D')->setWidth(15);
-        $sheet->getColumnDimension('E')->setWidth(15);
-        foreach (range('A', 'K') as $columnID) {
-            $sheet->getStyle($columnID)->getAlignment()->setWrapText(true);
-        }
-        $sheet->getPageSetup()->setOrientation(\PhpOffice\PhpSpreadsheet\Worksheet\PageSetup::ORIENTATION_LANDSCAPE);
-        $sheet->getPageMargins()->setTop(0.5)->setRight(0.1)->setLeft(0.1)->setBottom(0.1);
-        $sheet->getPageSetup()->setPrintArea('A:E')->setFitToWidth(1)->setFitToHeight(0);
+
+        $spreadsheet->setActiveSheetIndex(0);
+
         header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         header('Content-Disposition: attachment;filename="cuatrimestral_resumen.xlsx"');
         header('Cache-Control: max-age=0');
+
         $writer = IOFactory::createWriter($spreadsheet, 'Xlsx');
         $writer->save('php://output');
+        exit;
     }
 
     // ── Fin de métodos SP ─────────────────────────────────────────────────────
@@ -1032,20 +1442,20 @@ class ReporteController extends Controller
                 return $pdf->stream('cuatrimestral_detalle.pdf');
             }
             return $this->r_cuatrimestral_detalle_excel($reporte, $fecha_ini, $fecha_fin, $texto_fecha);
+        } else if ($formato == 'resumen') {
+            $reporteResumen = $this->buildCuatrimestralResumenReporteData($almacens, $fecha_ini, $fecha_fin, $donacion);
+            if ($tipo == 'pdf') {
+                $pdf = PDF::loadView('reportes.cuatrimestral_resumen_sp', compact('reporteResumen', 'texto_fecha', 'configuracion'))->setPaper('letter', 'portrait');
+                $pdf->output();
+                $dom_pdf = $pdf->getDomPDF();
+                $canvas = $dom_pdf->get_canvas();
+                $alto = $canvas->get_height();
+                $ancho = $canvas->get_width();
+                $canvas->page_text($ancho - 90, $alto - 25, "Página {PAGE_NUM} de {PAGE_COUNT}", null, 9, [0, 0, 0]);
+                return $pdf->stream('cuatrimestral_resumen.pdf');
+            }
+            return $this->r_cuatrimestral_resumen_excel($reporteResumen, $texto_fecha);
         }
-
-        $reporteResumen = $this->buildCuatrimestralResumenReporteData($almacens, $fecha_ini, $fecha_fin, $donacion);
-        if ($tipo == 'pdf') {
-            $pdf = PDF::loadView('reportes.cuatrimestral_resumen_sp', compact('reporteResumen', 'texto_fecha', 'configuracion'))->setPaper('letter', 'portrait');
-            $pdf->output();
-            $dom_pdf = $pdf->getDomPDF();
-            $canvas = $dom_pdf->get_canvas();
-            $alto = $canvas->get_height();
-            $ancho = $canvas->get_width();
-            $canvas->page_text($ancho - 90, $alto - 25, "Página {PAGE_NUM} de {PAGE_COUNT}", null, 9, [0, 0, 0]);
-            return $pdf->stream('cuatrimestral_resumen.pdf');
-        }
-        return $this->r_cuatrimestral_resumen_excel($reporteResumen, $texto_fecha);
     }
 
     public function conciliacion()
@@ -1164,7 +1574,9 @@ class ReporteController extends Controller
         $sheet->mergeCells("A{$fila}:H{$fila}");
         $sheet->getStyle("A{$fila}:H{$fila}")->getAlignment()->setHorizontal('center');
         $sheet->getStyle("A{$fila}:H{$fila}")->applyFromArray($this->titulo);
-        $fila++; $fila++; $fila++;
+        $fila++;
+        $fila++;
+        $fila++;
 
         $sheet->setCellValue('A' . $fila, 'PARTIDA');
         $sheet->mergeCells("A{$fila}:A" . ($fila + 1));

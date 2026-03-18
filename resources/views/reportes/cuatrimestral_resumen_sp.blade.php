@@ -96,47 +96,69 @@
         .bold {
             font-weight: bold;
         }
+
+        .nueva_pagina {
+            page-break-after: always;
+        }
     </style>
 </head>
 
 <body>
-    <div class="encabezado">
-        <div class="logo">
-            <img src="{{ $configuracion->logo_b64 }}">
-        </div>
-        <h2 class="titulo">{{ $configuracion->razon_social }}</h2>
-        <h4 class="texto">INVENTARIO FÍSICO VALORADO DE BIENES Y CONSUMO</h4>
-        <h4 class="fecha">{{ $texto_fecha }}</h4>
-    </div>
+    @php
+        $contador = 0;
+    @endphp
 
-    <table border="1">
-        <thead>
-            <tr>
-                <th>PARTIDA</th>
-                <th>DESCRIPCIÓN</th>
-                <th>INGRESOS</th>
-                <th>SALIDAS</th>
-                <th>SALDOS</th>
-            </tr>
-        </thead>
-        <tbody>
-            @foreach ($reporteResumen['partidas'] as $item)
+    @foreach ($reporteResumen as $resumen)
+        @php
+            $partidas = $resumen['partidas'];
+            $totales = $resumen['totales'];
+            $almacen = $resumen['almacen'];
+        @endphp
+        @php
+            $contador++;
+        @endphp
+        <div class="encabezado">
+            <div class="logo">
+                <img src="{{ $configuracion->logo_b64 }}">
+            </div>
+            <h2 class="titulo">{{ $configuracion->razon_social }}</h2>
+            <h4 class="texto">INVENTARIO FÍSICO VALORADO DE BIENES Y CONSUMO</h4>
+            <h4 class="fecha">{{ $texto_fecha }}</h4>
+            <h4 class="texto">{{ $almacen['nombre'] }}</h4>
+        </div>
+
+        <table border="1">
+            <thead>
                 <tr>
-                    <td class="centreado">{{ $item['partida']['nro_partida'] }}</td>
-                    <td>{{ $item['partida']['nombre'] }}</td>
-                    <td class="centreado">{{ number_format($item['ingresos'], 2, '.', '') }}</td>
-                    <td class="centreado">{{ number_format($item['egresos'], 2, '.', '') }}</td>
-                    <td class="centreado">{{ number_format($item['saldo'], 2, '.', '') }}</td>
+                    <th>PARTIDA</th>
+                    <th>DESCRIPCIÓN</th>
+                    <th>INGRESOS</th>
+                    <th>SALIDAS</th>
+                    <th>SALDOS</th>
                 </tr>
-            @endforeach
-            <tr>
-                <td colspan="2" class="derecha bold">TOTALES</td>
-                <td class="bold centreado">{{ number_format($reporteResumen['totales']['ingresos'], 2, '.', '') }}</td>
-                <td class="bold centreado">{{ number_format($reporteResumen['totales']['egresos'], 2, '.', '') }}</td>
-                <td class="bold centreado">{{ number_format($reporteResumen['totales']['saldo'], 2, '.', '') }}</td>
-            </tr>
-        </tbody>
-    </table>
+            </thead>
+            <tbody>
+                @foreach ($partidas as $p)
+                    <tr>
+                        <td class="centreado">{{ $p->partida }}</td>
+                        <td>{{ $p->descripcion }}</td>
+                        <td class="centreado">{{ number_format($p->ingresos, 2, '.', '') }}</td>
+                        <td class="centreado">{{ number_format($p->salidas, 2, '.', '') }}</td>
+                        <td class="centreado">{{ number_format($p->saldos, 2, '.', '') }}</td>
+                    </tr>
+                @endforeach
+                <tr>
+                    <td colspan="2" class="derecha bold">TOTALES</td>
+                    <td class="bold centreado">{{ number_format($totales['ingresos'], 2, '.', '') }}</td>
+                    <td class="bold centreado">{{ number_format($totales['salidas'], 2, '.', '') }}</td>
+                    <td class="bold centreado">{{ number_format($totales['saldos'], 2, '.', '') }}</td>
+                </tr>
+            </tbody>
+        </table>
+        @if ($contador < count($reporteResumen))
+            <div class="nueva_pagina"></div>
+        @endif
+    @endforeach
 </body>
 
 </html>

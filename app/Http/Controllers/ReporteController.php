@@ -5,13 +5,13 @@ namespace App\Http\Controllers;
 use App\Models\Almacen;
 use App\Models\Configuracion;
 use App\Models\Egreso;
-use App\Models\IEInterno;
 use App\Models\Ingreso;
 use App\Models\IngresoDetalle;
 use App\Models\Partida;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Inertia\Inertia;
 use PDF;
@@ -144,17 +144,25 @@ class ReporteController extends Controller
 
         $usuarios = $usuarios->orderBy("id", "ASC")->get();
 
-        $pdf = PDF::loadView('reportes.usuarios', compact('usuarios'))->setPaper('legal', 'landscape');
+        $aproxDatos = count($usuarios);
+        try {
+            $pdf = PDF::loadView('reportes.usuarios', compact('usuarios'))->setPaper('legal', 'landscape');
 
-        // ENUMERAR LAS PÁGINAS USANDO CANVAS
-        $pdf->output();
-        $dom_pdf = $pdf->getDomPDF();
-        $canvas = $dom_pdf->get_canvas();
-        $alto = $canvas->get_height();
-        $ancho = $canvas->get_width();
-        $canvas->page_text($ancho - 90, $alto - 25, "Página {PAGE_NUM} de {PAGE_COUNT}", null, 9, array(0, 0, 0));
+            // ENUMERAR LAS PÁGINAS USANDO CANVAS
+            $pdf->output();
+            $dom_pdf = $pdf->getDomPDF();
+            $canvas = $dom_pdf->get_canvas();
+            $alto = $canvas->get_height();
+            $ancho = $canvas->get_width();
+            $canvas->page_text($ancho - 90, $alto - 25, "Página {PAGE_NUM} de {PAGE_COUNT}", null, 9, array(0, 0, 0));
 
-        return $pdf->stream('usuarios.pdf');
+            return $pdf->stream('usuarios.pdf');
+        } catch (\Throwable $e) {
+            if ($this->isPdfMemoryOverflow($e)) {
+                return $this->pdfMemoryOverflowResponse($request, 'Usuarios', $aproxDatos, $e, false);
+            }
+            throw $e;
+        }
     }
 
     public function bimestral()
@@ -189,19 +197,33 @@ class ReporteController extends Controller
         if ($formato == 'detalle') {
             $reporte = $this->buildBimestralReporteData($almacens, $fecha_ini, $fecha_fin, $donacion);
             if ($tipo == 'pdf') {
-                $pdf = PDF::loadView(
-                    'reportes.bimestral_detalle_sp',
-                    compact('reporte', 'fecha_ini', 'fecha_fin', 'texto_fecha', 'configuracion')
-                )->setPaper('letter', 'landscape');
+                $aproxDatos = 0;
+                foreach ($reporte as $bloque) {
+                    foreach (($bloque['partidas'] ?? []) as $partidaData) {
+                        $aproxDatos += count($partidaData['filas'] ?? []);
+                    }
+                }
 
-                $pdf->output();
-                $dom_pdf = $pdf->getDomPDF();
-                $canvas  = $dom_pdf->get_canvas();
-                $alto    = $canvas->get_height();
-                $ancho   = $canvas->get_width();
-                $canvas->page_text($ancho - 90, $alto - 25, "Página {PAGE_NUM} de {PAGE_COUNT}", null, 9, [0, 0, 0]);
+                try {
+                    $pdf = PDF::loadView(
+                        'reportes.bimestral_detalle_sp',
+                        compact('reporte', 'fecha_ini', 'fecha_fin', 'texto_fecha', 'configuracion')
+                    )->setPaper('letter', 'landscape');
 
-                return $pdf->stream('bimestral_detalle.pdf');
+                    $pdf->output();
+                    $dom_pdf = $pdf->getDomPDF();
+                    $canvas  = $dom_pdf->get_canvas();
+                    $alto    = $canvas->get_height();
+                    $ancho   = $canvas->get_width();
+                    $canvas->page_text($ancho - 90, $alto - 25, "Página {PAGE_NUM} de {PAGE_COUNT}", null, 9, [0, 0, 0]);
+
+                    return $pdf->stream('bimestral_detalle.pdf');
+                } catch (\Throwable $e) {
+                    if ($this->isPdfMemoryOverflow($e)) {
+                        return $this->pdfMemoryOverflowResponse($request, 'Bimestral (Detalle)', $aproxDatos, $e, true);
+                    }
+                    throw $e;
+                }
             } else {
                 return $this->r_bimestral_detalle_excel($reporte, $fecha_ini, $fecha_fin, $texto_fecha);
             }
@@ -210,18 +232,30 @@ class ReporteController extends Controller
             $reporteResumen = $this->buildBimestralResumenReporteData($almacens, $fecha_ini, $fecha_fin, $donacion);
 
             if ($tipo == 'pdf') {
-                $pdf = PDF::loadView(
-                    'reportes.bimestral_resumen_sp',
-                    compact('reporteResumen', 'texto_fecha', 'configuracion')
-                )->setPaper('letter', 'portrait');
+                $aproxDatos = 0;
+                foreach ($reporteResumen as $bloque) {
+                    $aproxDatos += count($bloque['partidas'] ?? []);
+                }
 
-                $pdf->output();
-                $dom_pdf = $pdf->getDomPDF();
-                $canvas  = $dom_pdf->get_canvas();
-                $alto    = $canvas->get_height();
-                $ancho   = $canvas->get_width();
-                $canvas->page_text($ancho - 90, $alto - 25, "Página {PAGE_NUM} de {PAGE_COUNT}", null, 9, [0, 0, 0]);
-                return $pdf->stream('bimestral_resumen.pdf');
+                try {
+                    $pdf = PDF::loadView(
+                        'reportes.bimestral_resumen_sp',
+                        compact('reporteResumen', 'texto_fecha', 'configuracion')
+                    )->setPaper('letter', 'portrait');
+
+                    $pdf->output();
+                    $dom_pdf = $pdf->getDomPDF();
+                    $canvas  = $dom_pdf->get_canvas();
+                    $alto    = $canvas->get_height();
+                    $ancho   = $canvas->get_width();
+                    $canvas->page_text($ancho - 90, $alto - 25, "Página {PAGE_NUM} de {PAGE_COUNT}", null, 9, [0, 0, 0]);
+                    return $pdf->stream('bimestral_resumen.pdf');
+                } catch (\Throwable $e) {
+                    if ($this->isPdfMemoryOverflow($e)) {
+                        return $this->pdfMemoryOverflowResponse($request, 'Bimestral (Resumen)', $aproxDatos, $e, true);
+                    }
+                    throw $e;
+                }
             } else {
                 return $this->r_bimestral_resumen_excel($reporteResumen, $texto_fecha);
             }
@@ -1432,27 +1466,53 @@ class ReporteController extends Controller
         if ($formato == 'detalle') {
             $reporte = $this->buildCuatrimestralReporteData($almacens, $fecha_ini, $fecha_fin, $donacion);
             if ($tipo == 'pdf') {
-                $pdf = PDF::loadView('reportes.cuatrimestral_detalle_sp', compact('reporte', 'fecha_ini', 'fecha_fin', 'texto_fecha', 'configuracion'))->setPaper('letter', 'landscape');
-                $pdf->output();
-                $dom_pdf = $pdf->getDomPDF();
-                $canvas = $dom_pdf->get_canvas();
-                $alto = $canvas->get_height();
-                $ancho = $canvas->get_width();
-                $canvas->page_text($ancho - 90, $alto - 25, "Página {PAGE_NUM} de {PAGE_COUNT}", null, 9, [0, 0, 0]);
-                return $pdf->stream('cuatrimestral_detalle.pdf');
+                $aproxDatos = 0;
+                foreach ($reporte as $bloque) {
+                    foreach (($bloque['partidas'] ?? []) as $partidaData) {
+                        $aproxDatos += count($partidaData['filas'] ?? []);
+                    }
+                }
+
+                try {
+                    $pdf = PDF::loadView('reportes.cuatrimestral_detalle_sp', compact('reporte', 'fecha_ini', 'fecha_fin', 'texto_fecha', 'configuracion'))->setPaper('letter', 'landscape');
+                    $pdf->output();
+                    $dom_pdf = $pdf->getDomPDF();
+                    $canvas = $dom_pdf->get_canvas();
+                    $alto = $canvas->get_height();
+                    $ancho = $canvas->get_width();
+                    $canvas->page_text($ancho - 90, $alto - 25, "Página {PAGE_NUM} de {PAGE_COUNT}", null, 9, [0, 0, 0]);
+                    return $pdf->stream('cuatrimestral_detalle.pdf');
+                } catch (\Throwable $e) {
+                    if ($this->isPdfMemoryOverflow($e)) {
+                        return $this->pdfMemoryOverflowResponse($request, 'Cuatrimestral (Detalle)', $aproxDatos, $e, true);
+                    }
+                    throw $e;
+                }
             }
             return $this->r_cuatrimestral_detalle_excel($reporte, $fecha_ini, $fecha_fin, $texto_fecha);
         } else if ($formato == 'resumen') {
             $reporteResumen = $this->buildCuatrimestralResumenReporteData($almacens, $fecha_ini, $fecha_fin, $donacion);
             if ($tipo == 'pdf') {
-                $pdf = PDF::loadView('reportes.cuatrimestral_resumen_sp', compact('reporteResumen', 'texto_fecha', 'configuracion'))->setPaper('letter', 'portrait');
-                $pdf->output();
-                $dom_pdf = $pdf->getDomPDF();
-                $canvas = $dom_pdf->get_canvas();
-                $alto = $canvas->get_height();
-                $ancho = $canvas->get_width();
-                $canvas->page_text($ancho - 90, $alto - 25, "Página {PAGE_NUM} de {PAGE_COUNT}", null, 9, [0, 0, 0]);
-                return $pdf->stream('cuatrimestral_resumen.pdf');
+                $aproxDatos = 0;
+                foreach ($reporteResumen as $bloque) {
+                    $aproxDatos += count($bloque['partidas'] ?? []);
+                }
+
+                try {
+                    $pdf = PDF::loadView('reportes.cuatrimestral_resumen_sp', compact('reporteResumen', 'texto_fecha', 'configuracion'))->setPaper('letter', 'portrait');
+                    $pdf->output();
+                    $dom_pdf = $pdf->getDomPDF();
+                    $canvas = $dom_pdf->get_canvas();
+                    $alto = $canvas->get_height();
+                    $ancho = $canvas->get_width();
+                    $canvas->page_text($ancho - 90, $alto - 25, "Página {PAGE_NUM} de {PAGE_COUNT}", null, 9, [0, 0, 0]);
+                    return $pdf->stream('cuatrimestral_resumen.pdf');
+                } catch (\Throwable $e) {
+                    if ($this->isPdfMemoryOverflow($e)) {
+                        return $this->pdfMemoryOverflowResponse($request, 'Cuatrimestral (Resumen)', $aproxDatos, $e, true);
+                    }
+                    throw $e;
+                }
             }
             return $this->r_cuatrimestral_resumen_excel($reporteResumen, $texto_fecha);
         }
@@ -1466,66 +1526,74 @@ class ReporteController extends Controller
     /**
      * Conciliación: almacenes con grupo != CENTROS, SP resumen por almacén, agrupa por partida, calcula c,d,e,dif.
      */
-    private function buildConciliacionReporteData($almacens, $fecha_ini, $fecha_fin, $donacion = 'NO'): array
+    private function buildConciliacionReporteData($fecha_ini, $fecha_fin, $donacion = 'NO'): array
     {
-        $user = Auth::user();
-        $partidasOrden = Partida::orderBy('nro_partida')->get();
-        $agregado = [];
+        $user      = Auth::user();
+        $userTipo  = $user->tipo ?? '';
+        $unidadId  = $user->unidad_id ?? 0;
+        $userId    = $user->id ?? 0;
 
-        foreach ($almacens as $almacen) {
-            $filas = \Illuminate\Support\Facades\DB::select(
-                'CALL sp_reporte_resumen(?, ?, ?, ?, ?, ?, ?, ?)',
-                [
-                    $fecha_ini,
-                    $fecha_fin,
-                    $donacion,
-                    $almacen->grupo,
-                    $almacen->id,
-                    $user->tipo ?? '',
-                    $user->unidad_id ?? 0,
-                    $user->id ?? 0,
-                ]
-            );
-            foreach ($filas as $fila) {
-                $pid = $fila->partida_id;
-                if (!isset($agregado[$pid])) {
-                    $agregado[$pid] = ['ingresos' => 0, 'egresos' => 0];
-                }
-                $agregado[$pid]['ingresos'] += (float) $fila->ingresos;
-                $agregado[$pid]['egresos'] += (float) $fila->egresos;
-            }
+        // Llamada principal al SP (retorna: partida, grupo_contable, inventario(a), reporte_segip(b), pagos_gestion(c))
+        $filas = \Illuminate\Support\Facades\DB::select(
+            'CALL sp_reporte_conciliacion(?, ?, ?, ?, ?, ?)',
+            [$fecha_ini, $fecha_fin, $donacion, $userTipo, $unidadId, $userId]
+        );
+
+        // Segunda llamada para obtener DONACIONES GESTIÓN (d): ingresos con donacion='SI'
+        $filasD = \Illuminate\Support\Facades\DB::select(
+            'CALL sp_reporte_conciliacion(?, ?, ?, ?, ?, ?)',
+            [$fecha_ini, $fecha_fin, 'SI', $userTipo, $unidadId, $userId]
+        );
+
+        // Indexar resultados principales por nro_partida
+        $spData = [];
+        foreach ($filas as $fila) {
+            $spData[$fila->partida] = [
+                'inventario'    => (float) $fila->inventario,
+                'reporte_segip' => (float) $fila->reporte_segip,
+                'pagos_gestion' => (float) $fila->pagos_gestion,
+            ];
         }
 
-        $partidas = [];
-        $totales = ['ingresos' => 0, 'egresos' => 0, 'c' => 0, 'd' => 0, 'e' => 0, 'dif' => 0];
+        // Indexar donaciones por nro_partida (d = inventario de donaciones)
+        $donacionesMap = [];
+        foreach ($filasD as $fd) {
+            $donacionesMap[$fd->partida] = (float) $fd->inventario;
+        }
+
+        $partidasOrden = Partida::orderBy('nro_partida')->get();
+        $partidas      = [];
+        $totales       = ['ingresos' => 0, 'egresos' => 0, 'c' => 0, 'd' => 0, 'e' => 0, 'dif' => 0];
+
         foreach ($partidasOrden as $partida) {
-            $pid = $partida->id;
-            $ing = $agregado[$pid]['ingresos'] ?? 0;
-            $egr = $agregado[$pid]['egresos'] ?? 0;
-            $c = $ing - $egr;
-            $d = $ing - $egr + $c;
-            $e = $ing - $egr + $c - $d;
-            $dif = $ing - $egr + $c - $d - $e;
+            $data = $spData[$partida->nro_partida] ?? null;
+
+            $a   = $data['inventario']    ?? 0;   // BIENES DE CONSUMO ADQUIRIDOS
+            $b   = $data['reporte_segip'] ?? 0;   // PRESUPUESTO EJECUTADO
+            $c   = $data['pagos_gestion'] ?? 0;   // PAGOS GESTIÓN = a - b (calculado en SP)
+            $d   = $donacionesMap[$partida->nro_partida] ?? 0; // DONACIONES GESTIÓN
+            $e   = $a - $b + $c - $d;                               // POR PAGAR (sin fuente definida)
+            $dif = $a - $b + $c - $d - $e;        // DIFERENCIA: a-b+c-d-e
 
             $partidas[] = [
-                'partida' => [
-                    'id' => $partida->id,
+                'partida'  => [
                     'nro_partida' => $partida->nro_partida,
-                    'nombre' => $partida->nombre,
+                    'nombre'      => $partida->nombre,
                 ],
-                'ingresos' => $ing,
-                'egresos' => $egr,
-                'c' => $c,
-                'd' => $d,
-                'e' => $e,
-                'dif' => $dif,
+                'ingresos' => $a,
+                'egresos'  => $b,
+                'c'        => $c,
+                'd'        => $d,
+                'e'        => $e,
+                'dif'      => $dif,
             ];
-            $totales['ingresos'] += $ing;
-            $totales['egresos'] += $egr;
-            $totales['c'] += $c;
-            $totales['d'] += $d;
-            $totales['e'] += $e;
-            $totales['dif'] += $dif;
+
+            $totales['ingresos'] += $a;
+            $totales['egresos']  += $b;
+            $totales['c']        += $c;
+            $totales['d']        += $d;
+            $totales['e']        += $e;
+            $totales['dif']      += $dif;
         }
 
         return ['partidas' => $partidas, 'totales' => $totales];
@@ -1648,28 +1716,30 @@ class ReporteController extends Controller
     {
         $fecha_ini = $request->fecha_ini;
         $fecha_fin = $request->fecha_fin;
-        $tipo = $request->tipo;
-        $donacion = in_array($request->donacion, ['SI', 'NO']) ? $request->donacion : 'NO';
+        $tipo      = $request->tipo;
+        $donacion  = in_array($request->donacion, ['SI', 'NO']) ? $request->donacion : 'NO';
 
-        $almacens = Almacen::select("almacens.*");
-        $id_almacens = AlmacenController::getIdAlmacensPermiso(Auth::user());
-        $almacens->whereIn("id", $id_almacens);
-        $almacens->where("grupo", "!=", "CENTROS");
-        $almacens = $almacens->get();
-
-        $texto_fecha = ReporteController::getFechaTexto($fecha_ini, $fecha_fin);
-        $reporteConciliacion = $this->buildConciliacionReporteData($almacens, $fecha_ini, $fecha_fin, $donacion);
-        $configuracion = \App\Models\Configuracion::first();
+        $texto_fecha         = ReporteController::getFechaTexto($fecha_ini, $fecha_fin);
+        $reporteConciliacion = $this->buildConciliacionReporteData($fecha_ini, $fecha_fin, $donacion);
+        $configuracion       = \App\Models\Configuracion::first();
 
         if ($tipo == 'pdf') {
-            $pdf = PDF::loadView('reportes.conciliacion_sp', compact('reporteConciliacion', 'texto_fecha', 'configuracion', 'fecha_ini'))->setPaper('letter', 'landscape');
-            $pdf->output();
-            $dom_pdf = $pdf->getDomPDF();
-            $canvas = $dom_pdf->get_canvas();
-            $alto = $canvas->get_height();
-            $ancho = $canvas->get_width();
-            $canvas->page_text($ancho - 90, $alto - 25, "Página {PAGE_NUM} de {PAGE_COUNT}", null, 9, [0, 0, 0]);
-            return $pdf->stream('conciliacion.pdf');
+            $aproxDatos = count($reporteConciliacion['partidas'] ?? []);
+            try {
+                $pdf = PDF::loadView('reportes.conciliacion_sp', compact('reporteConciliacion', 'texto_fecha', 'configuracion', 'fecha_ini'))->setPaper('letter', 'landscape');
+                $pdf->output();
+                $dom_pdf = $pdf->getDomPDF();
+                $canvas = $dom_pdf->get_canvas();
+                $alto = $canvas->get_height();
+                $ancho = $canvas->get_width();
+                $canvas->page_text($ancho - 90, $alto - 25, "Página {PAGE_NUM} de {PAGE_COUNT}", null, 9, [0, 0, 0]);
+                return $pdf->stream('conciliacion.pdf');
+            } catch (\Throwable $e) {
+                if ($this->isPdfMemoryOverflow($e)) {
+                    return $this->pdfMemoryOverflowResponse($request, 'Conciliación', $aproxDatos, $e, true);
+                }
+                throw $e;
+            }
         }
 
         return $this->r_conciliacion_excel($reporteConciliacion, $texto_fecha, $fecha_ini);
@@ -1687,7 +1757,48 @@ class ReporteController extends Controller
         return $texto_fecha;
     }
 
+    private function isPdfMemoryOverflow(\Throwable $e): bool
+    {
+        $msg = (string) ($e->getMessage() ?? '');
+        if ($msg === '') {
+            return false;
+        }
 
+        return str_contains($msg, 'Allowed memory size') ||
+            str_contains($msg, 'Cellmap.php') ||
+            (str_contains(strtolower($msg), 'memory') && str_contains(strtolower($msg), 'exhaust'));
+    }
+
+    private function pdfMemoryOverflowResponse(
+        Request $request,
+        string $reporteLabel,
+        ?int $aproxDatos,
+        \Throwable $e,
+        bool $buildExcelLink
+    ) {
+        $params = $request->query();
+        $excelUrl = null;
+
+        if ($buildExcelLink) {
+            $params['tipo'] = 'excel';
+            $excelUrl = $request->url() . (count($params) ? ('?' . http_build_query($params)) : '');
+        }
+
+        $errorMsg = mb_substr((string) ($e->getMessage() ?? ''), 0, 500);
+
+        $mensaje = 'La generación de PDF excedió el límite de recursos (dompdf) para renderizar tantos datos.';
+        if ($aproxDatos !== null) {
+            $mensaje .= ' Cantidad aproximada de datos: ' . number_format($aproxDatos, 0, '.', ',') . '.';
+        }
+        $mensaje .= ' Por favor genere el reporte en EXCEL (o reduzca la cantidad de datos).';
+
+        return response()->view('reportes.pdf_overflow', [
+            'reporteLabel' => $reporteLabel,
+            'mensaje' => $mensaje,
+            'excelUrl' => $excelUrl,
+            'error' => $errorMsg,
+        ], 413);
+    }
 
     public function ie_internos()
     {
@@ -1702,499 +1813,535 @@ class ReporteController extends Controller
         $formato = $request->formato;
         $tipo = $request->tipo;
 
-        $partidas = Partida::all();
-        $almacens = Almacen::select("almacens.*");
+        $partidas = Partida::orderBy('nro_partida')->get();
+        $almacens = Almacen::select('almacens.*');
 
         if ($almacen_id != 'todos') {
-            $almacens->where("id", $almacen_id);
+            $almacens->where('id', $almacen_id);
         } else {
             $id_almacens = AlmacenController::getIdAlmacensPermiso(Auth::user());
-            $almacens->whereIn("id", $id_almacens);
+            $almacens->whereIn('id', $id_almacens);
         }
 
         $texto_fecha = ReporteController::getFechaTexto($fecha_ini, $fecha_fin);
-
+        $configuracion = Configuracion::first();
         $almacens = $almacens->get();
 
+        $reporte = $this->buildIeInternosReporteData($almacens, $partidas, $fecha_ini, $fecha_fin);
+
+        $nFilas = 0;
+        foreach ($reporte as $bloque) {
+            foreach ($bloque['partidas'] as $p) {
+                $nFilas += count($p['filas']);
+            }
+        }
+        $aproxDatos = max(1, $nFilas);
+
         if ($tipo == 'pdf') {
-            $archivo = "reportes.ie_internos";
             $orientacion = $formato == 'detalle' ? 'landscape' : 'portrait';
 
-            $pdf = PDF::loadView($archivo, compact('partidas', 'almacens', 'fecha_ini', 'fecha_fin', 'texto_fecha'))->setPaper('letter', $orientacion);
+            try {
+                $pdf = PDF::loadView(
+                    'reportes.ie_internos_sp',
+                    compact('reporte', 'fecha_ini', 'fecha_fin', 'texto_fecha', 'configuracion')
+                )->setPaper('letter', $orientacion);
 
-            // ENUMERAR LAS PÁGINAS USANDO CANVAS
-            $pdf->output();
-            $dom_pdf = $pdf->getDomPDF();
-            $canvas = $dom_pdf->get_canvas();
-            $alto = $canvas->get_height();
-            $ancho = $canvas->get_width();
-            $canvas->page_text($ancho - 90, $alto - 25, "Página {PAGE_NUM} de {PAGE_COUNT}", null, 9, array(0, 0, 0));
+                $pdf->output();
+                $dom_pdf = $pdf->getDomPDF();
+                $canvas = $dom_pdf->get_canvas();
+                $alto = $canvas->get_height();
+                $ancho = $canvas->get_width();
+                $canvas->page_text($ancho - 90, $alto - 25, 'Página {PAGE_NUM} de {PAGE_COUNT}', null, 9, [0, 0, 0]);
 
-            return $pdf->stream('bimestral_detalle.pdf');
-        } else {
-            // EXCEL
-            $spreadsheet = new Spreadsheet();
-            $spreadsheet->getProperties()
-                ->setCreator("ADMIN")
-                ->setLastModifiedBy('Administración')
-                ->setTitle('Formularios')
-                ->setSubject('Formularios')
-                ->setDescription('Formularios')
-                ->setKeywords('PHPSpreadsheet')
-                ->setCategory('Listado');
-
-            $sheet = $spreadsheet->getActiveSheet();
-
-            $spreadsheet->getDefaultStyle()->getFont()->setName('Arial');
-
-            $fila = 1;
-            if (file_exists(public_path() . '/imgs/' . Configuracion::first()->logo)) {
-                $drawing = new \PhpOffice\PhpSpreadsheet\Worksheet\Drawing();
-                $drawing->setName('logo');
-                $drawing->setDescription('logo');
-                $drawing->setPath(public_path() . '/imgs/' . Configuracion::first()->logo); // put your path and image here
-                $drawing->setCoordinates('A' . $fila);
-                $drawing->setOffsetX(5);
-                $drawing->setOffsetY(0);
-                $drawing->setHeight(60);
-                $drawing->setWorksheet($sheet);
-            }
-
-            $fila = 2;
-
-            foreach ($almacens as $almacen) {
-                $sheet->setCellValue('A' . $fila, Configuracion::first()->razon_social);
-                $sheet->mergeCells("A" . $fila . ":Q" . $fila);  //COMBINAR CELDAS
-                $sheet->getStyle('A' . $fila . ':Q' . $fila)->getAlignment()->setHorizontal('center');
-                $sheet->getStyle('A' . $fila . ':Q' . $fila)->applyFromArray($this->titulo);
-                $fila++;
-                $sheet->setCellValue('A' . $fila, "SALDOS FÍSICOS VALORADOS DE EXISTENCIAS DE ALMACENES");
-                $sheet->mergeCells("A" . $fila . ":Q" . $fila);  //COMBINAR CELDAS
-                $sheet->getStyle('A' . $fila . ':Q' . $fila)->getAlignment()->setHorizontal('center');
-                $sheet->getStyle('A' . $fila . ':Q' . $fila)->applyFromArray($this->titulo);
-                $fila++;
-                $sheet->setCellValue('A' . $fila, $almacen->nombre);
-                $sheet->mergeCells("A" . $fila . ":Q" . $fila);  //COMBINAR CELDAS
-                $sheet->getStyle('A' . $fila . ':Q' . $fila)->getAlignment()->setHorizontal('center');
-                $sheet->getStyle('A' . $fila . ':Q' . $fila)->applyFromArray($this->titulo);
-                $fila++;
-                $sheet->setCellValue('A' . $fila, $texto_fecha);
-                $sheet->mergeCells("A" . $fila . ":Q" . $fila);  //COMBINAR CELDAS
-                $sheet->getStyle('A' . $fila . ':Q' . $fila)->getAlignment()->setHorizontal('center');
-                $sheet->getStyle('A' . $fila . ':Q' . $fila)->applyFromArray($this->titulo);
-                $fila++;
-                $fila++;
-                $fila++;
-                $sheet->setCellValue('A' . $fila, 'N°');
-                $sheet->mergeCells("A" . $fila . ":A" . $fila + 1);  //COMBINAR CELDAS
-                $sheet->setCellValue('B' . $fila, 'CÓDIGO');
-                $sheet->mergeCells("B" . $fila . ":B" . $fila + 1);  //COMBINAR CELDAS
-                $sheet->setCellValue('C' . $fila, 'UNIDAD');
-                $sheet->mergeCells("C" . $fila . ":C" . $fila + 1);  //COMBINAR CELDAS
-                $sheet->setCellValue('D' . $fila, 'DESCRIPCIÓN');
-                $sheet->mergeCells("D" . $fila . ":D" . $fila + 1);  //COMBINAR CELDAS
-                $txt_saldo_anterior = $fecha_ini ? 'SALDO AL ' . date('d/m/Y', strtotime($fecha_ini)) : 'SALDO ANTERIOR';
-                $sheet->setCellValue('E' . $fila, $txt_saldo_anterior);
-                $sheet->mergeCells("E" . $fila . ":G" . $fila);  //COMBINAR CELDAS
-                $sheet->setCellValue('H' . $fila, 'FECHA INGRESO');
-                $sheet->mergeCells("H" . $fila . ":H" . $fila + 1);  //COMBINAR CELDAS
-                $sheet->setCellValue('I' . $fila, 'INGRESO ALMACENES');
-                $sheet->mergeCells("I" . $fila . ":K" . $fila);  //COMBINAR CELDAS
-                $sheet->setCellValue('L' . $fila, 'SALIDA ALMACENES');
-                $sheet->mergeCells("L" . $fila . ":N" . $fila);  //COMBINAR CELDAS
-                $txt_saldo_anterior = $fecha_fin ? 'SALDO AL ' . date('d/m/Y', strtotime($fecha_fin)) : 'SALDO';
-                $sheet->setCellValue('O' . $fila, 'SALDO AL ' . $txt_saldo_anterior);
-                $sheet->mergeCells("O" . $fila . ":Q" . $fila);  //COMBINAR CELDAS
-                $sheet->getStyle('A' . $fila . ':Q' . $fila)->applyFromArray($this->headerTabla);
-                $fila++;
-
-                $sheet->setCellValue('E' . $fila, 'CANT.');
-                $sheet->setCellValue('F' . $fila, 'C/U');
-                $sheet->setCellValue('G' . $fila, 'TOTAL BS.');
-                $sheet->setCellValue('I' . $fila, 'CANT.');
-                $sheet->setCellValue('J' . $fila, 'C/U');
-                $sheet->setCellValue('K' . $fila, 'TOTAL BS.');
-                $sheet->setCellValue('L' . $fila, 'CANT.');
-                $sheet->setCellValue('M' . $fila, 'C/U');
-                $sheet->setCellValue('N' . $fila, 'TOTAL BS.');
-                $sheet->setCellValue('O' . $fila, 'CANT.');
-                $sheet->setCellValue('P' . $fila, 'C/U');
-                $sheet->setCellValue('Q' . $fila, 'TOTAL BS.');
-                $sheet->getStyle('E' . $fila . ':Q' . $fila)->applyFromArray($this->headerTabla);
-                $fila++;
-                $total1 = 0;
-                $total2 = 0;
-                $total3 = 0;
-                $total4 = 0;
-                $cont = 1;
-                foreach ($partidas as $partida) {
-                    $totalp1 = 0;
-                    $totalp2 = 0;
-                    $totalp3 = 0;
-                    $totalp4 = 0;
-
-                    if ($almacen->id == 1) {
-                        //ALMACEN CENTRAL
-                        $ingresos = IngresoDetalle::select("ingreso_detalles.*")
-                            ->join("ingresos", "ingresos.id", "=", "ingreso_detalles.ingreso_id");
-                        $ingresos->where('ingresos.almacen_id', $almacen->id);
-                        if ($fecha_ini && $fecha_fin) {
-                            $ingresos->whereBetween('fecha_registro', [$fecha_ini, $fecha_fin]);
-                        }
-
-                        // EXTERNO
-                        $user = Auth::user();
-                        if ($user->tipo == 'EXTERNO') {
-                            $ingresos->where('ingresos.unidad_id', $user->unidad_id);
-                            $ingresos->where('ingresos.user_id', $user->id);
-                        }
-
-                        $ingresos->where('partida_id', $partida->id);
-                        $ingresos = $ingresos->get();
-
-                        // VERIFICAR SALDOS ANTERIORES
-                        $saldo = 0;
-                        $reg_ingresos = [];
-                        if ($fecha_ini && $fecha_fin) {
-                            $reg_ingresos = IngresoDetalle::select("ingreso_detalles.*")
-                                ->join("ingresos", "ingresos.id", "=", "ingreso_detalles.ingreso_id");
-                            $reg_ingresos->where('ingresos.almacen_id', $almacen->id);
-                            $reg_ingresos->where('fecha_registro', '<', $fecha_ini);
-                            $reg_ingresos->where('partida_id', $partida->id);
-                            $reg_ingresos = $reg_ingresos->get();
-                        }
-
-                        if (count($ingresos) > 0 || count($reg_ingresos) > 0) {
-                            $sheet->setCellValue('A' . $fila, 'PARTIDA N° ' . $partida->nro_partida);
-                            $sheet->getStyle('A' . $fila . ':C' . $fila)->applyFromArray($this->bg1);
-                            $sheet->mergeCells("A" . $fila . ":C" . $fila);  //COMBINAR CELDAS
-                            $sheet->getStyle('A' . $fila . ':C' . $fila)->applyFromArray($this->bodyTabla);
-                            $fila++;
-                            if (count($ingresos) > 0) {
-                                foreach ($ingresos as $ingreso) {
-                                    // SALDOS
-                                    $saldo = 0;
-                                    if ($fecha_ini && $fecha_fin) {
-                                        $sum_reg_ingresos = IngresoDetalle::select("ingreso_detalles.*")
-                                            ->join("ingresos", "ingresos.id", "=", "ingreso_detalles.ingreso_id");
-                                        $sum_reg_ingresos->where('ingresos.almacen_id', $almacen->id);
-                                        $sum_reg_ingresos->where('fecha_registro', '<', $fecha_ini);
-                                        $sum_reg_ingresos->where('partida_id', $partida->id);
-                                        $sum_reg_ingresos->where('item_id', $ingreso->item_id);
-                                        // EXTERNO
-                                        $user = Auth::user();
-                                        if ($user->tipo == 'EXTERNO') {
-                                            $sum_reg_ingresos->where('ingresos.unidad_id', $user->unidad_id);
-                                            $sum_reg_ingresos->where('ingresos.user_id', $user->id);
-                                        }
-                                        $sum_reg_ingresos = $sum_reg_ingresos->sum('ingreso_detalles.total');
-
-                                        $reg_egresos = IngresoDetalle::select("ingreso_detalles.*")
-                                            ->join("ingresos", "ingresos.id", "=", "ingreso_detalles.ingreso_id")->join(
-                                                'egresos',
-                                                'egresos.ingreso_id',
-                                                '=',
-                                                'ingresos.id',
-                                            );
-                                        $reg_egresos->where('egresos.almacen_id', $almacen->id);
-                                        $reg_egresos->where('egresos.fecha_registro', '<', $fecha_ini);
-                                        $reg_egresos->where('egresos.partida_id', $partida->id);
-                                        $reg_egresos->where('egresos.item_id', $ingreso->item_id);
-                                        // EXTERNO
-                                        $user = Auth::user();
-                                        if ($user->tipo == 'EXTERNO') {
-                                            $reg_egresos->where('ingresos.unidad_id', $user->unidad_id);
-                                            $reg_egresos->where('ingresos.user_id', $user->id);
-                                        }
-                                        $reg_egresos = $reg_egresos->sum('egresos.total');
-                                        $saldo = $sum_reg_ingresos - $reg_egresos;
-                                    }
-
-                                    $sheet->setCellValue('A' . $fila, $cont++);
-                                    $sheet->setCellValue('B' . $fila, $ingreso->ingreso_id);
-                                    $sheet->setCellValue('C' . $fila, $ingreso->unidad_medida->nombre);
-                                    $sheet->setCellValue('D' . $fila, $ingreso->producto->nombre);
-                                    $sheet->setCellValue('G' . $fila, $saldo);
-                                    $sheet->setCellValue('H' . $fila, $ingreso->ingreso->fecha_ingreso_t);
-                                    $sheet->setCellValue('I' . $fila, $ingreso->cantidad);
-                                    $sheet->setCellValue('J' . $fila, $ingreso->costo);
-                                    $sheet->setCellValue('K' . $fila, $ingreso->total);
-                                    $sheet->setCellValue('L' . $fila, $ingreso->egreso ? $ingreso->egreso->cantidad : 0);
-                                    $sheet->setCellValue('M' . $fila, $ingreso->egreso ? $ingreso->egreso->costo : 0);
-                                    $sheet->setCellValue('N' . $fila, $ingreso->egreso ? $ingreso->egreso->total : 0);
-                                    $sheet->setCellValue('O' . $fila, $ingreso->egreso ? $ingreso->egreso->s_cantidad : $ingreso->cantidad);
-                                    $sheet->setCellValue('P' . $fila, $ingreso->costo);
-                                    $sheet->setCellValue('Q' . $fila,  $ingreso->egreso ? $ingreso->egreso->s_total : $ingreso->total);
-                                    $sheet->getStyle('A' . $fila . ':Q' . $fila)->applyFromArray($this->bodyTabla);
-                                    $sheet->getStyle('F' . $fila . ':Q' . $fila)->applyFromArray($this->celdaCenter);
-
-
-                                    // total partridas
-                                    $totalp1 += (float) $saldo;
-                                    $totalp2 += (float) $ingreso->total;
-                                    $totalp3 += $ingreso->egreso ? (float) $ingreso->egreso->total : 0;
-                                    $totalp4 += $ingreso->egreso ? (float) $ingreso->egreso->s_total : $ingreso->total;
-                                    // Log::debug('DD');
-
-                                    // totalgeneral
-                                    $total1 += (float) $saldo;
-                                    $total2 += (float) $ingreso->total;
-                                    $total3 += $ingreso->egreso ? (float) $ingreso->egreso->total : 0;
-                                    $total4 += $ingreso->egreso ? (float) $ingreso->egreso->s_total : $ingreso->total;
-
-                                    $fila++;
-                                }
-                            }
-
-                            if (count($reg_ingresos) > 0) {
-                                foreach ($reg_ingresos as $r_ingreso) {
-                                    $saldo = $r_ingreso->total;
-                                    if ($r_ingreso->egreso) {
-                                        $saldo = (float) $r_ingreso->total - $r_ingreso->egreso->total;
-                                    }
-
-                                    $sheet->setCellValue('A' . $fila, $cont++);
-                                    $sheet->setCellValue('B' . $fila, $r_ingreso->ingreso_id);
-                                    $sheet->setCellValue('C' . $fila, $r_ingreso->unidad_medida->nombre);
-                                    $sheet->setCellValue('D' . $fila, $r_ingreso->producto->nombre);
-                                    $sheet->setCellValue('G' . $fila, $saldo);
-                                    // $sheet->setCellValue('J' . $fila, $r_ingreso->costo);
-                                    $sheet->setCellValue('Q' . $fila, $saldo);
-                                    $sheet->getStyle('A' . $fila . ':Q' . $fila)->applyFromArray($this->bodyTabla);
-                                    $sheet->getStyle('F' . $fila . ':Q' . $fila)->applyFromArray($this->celdaCenter);
-                                    $fila++;
-                                    // partida
-                                    $totalp1 += (float) $saldo;
-                                    $totalp4 += (float) $saldo;
-
-                                    // general
-                                    $total1 += (float) $saldo;
-                                    $total4 += (float) $saldo;
-                                }
-                            }
-                            $sheet->setCellValue('A' . $fila, 'TOTAL PARTIDA N° ' . $partida->nro_partida);
-                            $sheet->mergeCells("A" . $fila . ":D" . $fila);  //COMBINAR CELDAS
-                            $sheet->setCellValue('G' . $fila, number_format($totalp1, 2, ".", ""));
-                            $sheet->setCellValue('K' . $fila, number_format($totalp2, 2, ".", ""));
-                            $sheet->setCellValue('N' . $fila, number_format($totalp3, 2, ".", ""));
-                            $sheet->setCellValue('Q' . $fila, number_format($totalp4, 2, ".", ""));
-                            $sheet->getStyle('A' . $fila . ':Q' . $fila)->applyFromArray($this->footerTabla);
-                            $fila++;
-                        }
-                    } else {
-                        //ALMACENES
-                        // INGRESOS RANGO FECHAS
-                        $ie_internos = IEInterno::select('i_e_internos.*')
-                            ->join(
-                                'ingreso_detalles',
-                                'ingreso_detalles.id',
-                                '=',
-                                'i_e_internos.ingreso_detalle_id',
-                            )
-                            ->join('ingresos', 'ingresos.id', '=', 'ingreso_detalles.ingreso_id');
-                        $ie_internos->where('i_e_internos.almacen_id', $almacen->id);
-                        if ($fecha_ini && $fecha_fin) {
-                            $ie_internos->whereBetween('i_e_internos.fecha_registro', [$fecha_ini, $fecha_fin]);
-                        }
-
-                        // EXTERNO
-                        $user = Auth::user();
-                        if ($user->tipo == 'EXTERNO') {
-                            $ie_internos->where('ingresos.unidad_id', $user->unidad_id);
-                            $ie_internos->where('ingresos.user_id', $user->id);
-                        }
-
-                        $ie_internos->where('partida_id', $partida->id);
-                        $ie_internos = $ie_internos->get();
-
-                        // VERIFICAR SALDOS ANTERIORES
-                        $saldo = 0;
-                        $reg_ingresos = [];
-                        if ($fecha_ini && $fecha_fin) {
-                            $reg_ingresos = IEInterno::select('i_e_internos.*')
-                                ->join(
-                                    'ingreso_detalles',
-                                    'ingreso_detalles.id',
-                                    '=',
-                                    'i_e_internos.ingreso_detalle_id',
-                                )
-                                ->join('ingresos', 'ingresos.id', '=', 'ingreso_detalles.ingreso_id');
-                            $reg_ingresos->where('i_e_internos.almacen_id', $almacen->id);
-                            $reg_ingresos->where('i_e_internos.fecha_registro', '<', $fecha_ini);
-                            $reg_ingresos->where('partida_id', $partida->id);
-
-                            // EXTERNO
-                            $user = Auth::user();
-                            if ($user->tipo == 'EXTERNO') {
-                                $reg_ingresos->where('ingresos.unidad_id', $user->unidad_id);
-                                $reg_ingresos->where('ingresos.user_id', $user->id);
-                            }
-
-                            $reg_ingresos = $reg_ingresos->get();
-                        }
-                        if (count($ie_internos) > 0 || count($reg_ingresos) > 0) {
-                            $sheet->setCellValue('A' . $fila, 'PARTIDA N° ' . $partida->nro_partida);
-                            $sheet->getStyle('A' . $fila . ':C' . $fila)->applyFromArray($this->bg1);
-                            $sheet->mergeCells("A" . $fila . ":C" . $fila);  //COMBINAR CELDAS
-                            $sheet->getStyle('A' . $fila . ':C' . $fila)->applyFromArray($this->bodyTabla);
-                            $fila++;
-                            if (count($ie_internos) > 0) {
-                                foreach ($ie_internos as $ie_interno) {
-                                    // SALDOS
-                                    $saldo = 0;
-                                    if ($fecha_ini && $fecha_fin) {
-                                        $sum_reg_ingresos = IEInterno::select('i_e_internos.*')
-                                            ->join(
-                                                'ingreso_detalles',
-                                                'ingreso_detalles.id',
-                                                '=',
-                                                'i_e_internos.ingreso_detalle_id',
-                                            )
-                                            ->join('ingresos', 'ingresos.id', '=', 'ingreso_detalles.ingreso_id');
-                                        $sum_reg_ingresos->where('i_e_internos.almacen_id', $almacen->id);
-                                        $sum_reg_ingresos->where('i_e_internos.fecha_registro', '<', $fecha_ini);
-                                        $sum_reg_ingresos->where('partida_id', $partida->id);
-                                        $sum_reg_ingresos->where('i_e_internos.item_id', $ie_interno->item_id);
-                                        // EXTERNO
-                                        $user = Auth::user();
-                                        if ($user->tipo == 'EXTERNO') {
-                                            $sum_reg_ingresos->where('ingresos.unidad_id', $user->unidad_id);
-                                            $sum_reg_ingresos->where('ingresos.user_id', $user->id);
-                                        }
-                                        $sum_reg_ingresos = $sum_reg_ingresos->sum('itotal');
-
-                                        $reg_egresos = IEInterno::select('i_e_internos.*')
-                                            ->join(
-                                                'ingreso_detalles',
-                                                'ingreso_detalles.id',
-                                                '=',
-                                                'i_e_internos.ingreso_detalle_id',
-                                            )
-                                            ->join('ingresos', 'ingresos.id', '=', 'ingreso_detalles.ingreso_id');
-                                        $reg_egresos->where('i_e_internos.almacen_id', $almacen->id);
-                                        $reg_egresos->where('i_e_internos.fecha_egreso', '<', $fecha_ini);
-                                        $reg_egresos->where('partida_id', $partida->id);
-                                        $reg_egresos->where('i_e_internos.item_id', $ie_interno->item_id);
-                                        // EXTERNO
-                                        $user = Auth::user();
-                                        if ($user->tipo == 'EXTERNO') {
-                                            $reg_egresos->where('ingresos.unidad_id', $user->unidad_id);
-                                            $reg_egresos->where('ingresos.user_id', $user->id);
-                                        }
-                                        $reg_egresos = $reg_egresos->sum('etotal');
-                                        $saldo = $sum_reg_ingresos - $reg_egresos;
-                                    }
-
-                                    $sheet->setCellValue('A' . $fila, $cont++);
-                                    $sheet->setCellValue('B' . $fila, $ie_interno->ingreso->id);
-                                    $sheet->setCellValue('C' . $fila, $ie_interno->ingreso_detalle->unidad_medida->nombre);
-                                    $sheet->setCellValue('D' . $fila, $ie_interno->producto->nombre);
-                                    $sheet->setCellValue('G' . $fila, $saldo);
-                                    $sheet->setCellValue('H' . $fila, $ie_interno->fecha_registro_t);
-                                    $sheet->setCellValue('I' . $fila, $ie_interno->icantidad);
-                                    $sheet->setCellValue('J' . $fila, $ie_interno->icosto);
-                                    $sheet->setCellValue('K' . $fila, $ie_interno->itotal);
-                                    $sheet->setCellValue('L' . $fila, $ie_interno->ecantidad);
-                                    $sheet->setCellValue('M' . $fila, $ie_interno->icosto);
-                                    $sheet->setCellValue('N' . $fila, $ie_interno->etotal);
-                                    $sheet->setCellValue('O' . $fila, $ie_interno->s_cantidad);
-                                    $sheet->setCellValue('P' . $fila, $ie_interno->icosto);
-                                    $sheet->setCellValue('Q' . $fila,  $ie_interno->s_total);
-                                    $sheet->getStyle('A' . $fila . ':Q' . $fila)->applyFromArray($this->bodyTabla);
-                                    $sheet->getStyle('F' . $fila . ':Q' . $fila)->applyFromArray($this->celdaCenter);
-
-                                    // total partridas
-                                    $totalp1 += (float) $saldo;
-                                    $totalp2 += (float) $ie_interno->itotal;
-                                    $totalp3 += (float) $ie_interno->total;
-                                    $totalp4 += (float) $ie_interno->s_total;
-                                    // Log::debug('DD');
-
-                                    // totalgeneral
-                                    $total1 += (float) $saldo;
-                                    $total2 += (float) $ie_interno->itotal;
-                                    $total3 += (float) $ie_interno->total;
-                                    $total4 += (float) $ie_interno->s_total;
-
-                                    $fila++;
-                                }
-                            }
-
-                            if (count($reg_ingresos) > 0) {
-                                foreach ($reg_ingresos as $r_ingreso) {
-                                    $saldo = $r_ingreso->itotal;
-                                    if ($r_ingreso->ecantidad && $r_ingreso->etotal) {
-                                        $saldo = (float) $r_ingreso->itotal - $r_ingreso->etotal;
-                                    }
-
-                                    $sheet->setCellValue('A' . $fila, $cont++);
-                                    $sheet->setCellValue('B' . $fila, $r_ingreso->ingreso->id);
-                                    $sheet->setCellValue('C' . $fila, $r_ingreso->ingreso_detalle->unidad_medida->nombre);
-                                    $sheet->setCellValue('D' . $fila, $r_ingreso->producto->nombre);
-                                    $sheet->setCellValue('G' . $fila, $saldo);
-                                    // $sheet->setCellValue('J' . $fila, $r_ingreso->costo);
-                                    $sheet->setCellValue('Q' . $fila, $saldo);
-                                    $sheet->getStyle('A' . $fila . ':Q' . $fila)->applyFromArray($this->bodyTabla);
-                                    $sheet->getStyle('F' . $fila . ':Q' . $fila)->applyFromArray($this->celdaCenter);
-                                    $fila++;
-                                    // partida
-                                    $totalp1 += (float) $saldo;
-                                    $totalp4 += (float) $saldo;
-
-                                    // general
-                                    $total1 += (float) $saldo;
-                                    $total4 += (float) $saldo;
-                                }
-                            }
-                            $sheet->setCellValue('A' . $fila, 'TOTAL PARTIDA N° ' . $partida->nro_partida);
-                            $sheet->mergeCells("A" . $fila . ":D" . $fila);  //COMBINAR CELDAS
-                            $sheet->setCellValue('G' . $fila, number_format($totalp1, 2, ".", ""));
-                            $sheet->setCellValue('K' . $fila, number_format($totalp2, 2, ".", ""));
-                            $sheet->setCellValue('N' . $fila, number_format($totalp3, 2, ".", ""));
-                            $sheet->setCellValue('Q' . $fila, number_format($totalp4, 2, ".", ""));
-                            $sheet->getStyle('A' . $fila . ':Q' . $fila)->applyFromArray($this->footerTabla);
-                        }
-                    }
+                return $pdf->stream('ie_internos.pdf');
+            } catch (\Throwable $e) {
+                if ($this->isPdfMemoryOverflow($e)) {
+                    return $this->pdfMemoryOverflowResponse($request, 'IE Internos', $aproxDatos, $e, true);
                 }
-                $sheet->setCellValue('A' . $fila, 'TOTAL GENERAL');
-                $sheet->mergeCells("A" . $fila . ":D" . $fila);  //COMBINAR CELDAS
-                $sheet->setCellValue('G' . $fila, number_format($total1, 2, ".", ""));
-                $sheet->setCellValue('K' . $fila, number_format($total2, 2, ".", ""));
-                $sheet->setCellValue('N' . $fila, number_format($total3, 2, ".", ""));
-                $sheet->setCellValue('Q' . $fila, number_format($total4, 2, ".", ""));
-                $sheet->getStyle('A' . $fila . ':Q' . $fila)->applyFromArray($this->footerTabla);
-
-                $fila++;
-                $fila++;
-                $fila++;
-                $fila++;
+                throw $e;
             }
-
-            $sheet->getColumnDimension('A')->setWidth(6);
-            $sheet->getColumnDimension('B')->setWidth(20);
-            $sheet->getColumnDimension('C')->setWidth(15);
-            $sheet->getColumnDimension('D')->setWidth(15);
-
-            foreach (range('A', 'Q') as $columnID) {
-                $sheet->getStyle($columnID)->getAlignment()->setWrapText(true);
-            }
-
-            $sheet->getPageSetup()->setOrientation(\PhpOffice\PhpSpreadsheet\Worksheet\PageSetup::ORIENTATION_LANDSCAPE);
-            $sheet->getPageMargins()->setTop(0.5);
-            $sheet->getPageMargins()->setRight(0.1);
-            $sheet->getPageMargins()->setLeft(0.1);
-            $sheet->getPageMargins()->setBottom(0.1);
-            $sheet->getPageSetup()->setPrintArea('A:Q');
-            $sheet->getPageSetup()->setFitToWidth(1);
-            $sheet->getPageSetup()->setFitToHeight(0);
-
-
-            // DESCARGA DEL ARCHIVO
-            header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-            header('Content-Disposition: attachment;filename="ie_internos' . time() . '.xlsx"');
-            header('Cache-Control: max-age=0');
-            $writer = IOFactory::createWriter($spreadsheet, 'Xlsx');
-            $writer->save('php://output');
         }
+
+        return $this->r_ie_internos_detalle_excel($reporte, $fecha_ini, $fecha_fin, $texto_fecha);
+    }
+
+    /**
+     * Almacén central: nombre "ALMACÉN CENTRAL" y grupo "CENTRAL" (sustituye el antiguo id == 1).
+     */
+    private function isAlmacenCentralIeInternos(Almacen $almacen): bool
+    {
+        $nombre = mb_strtoupper(trim((string) ($almacen->nombre ?? '')), 'UTF-8');
+        $esNombreCentral = $nombre === mb_strtoupper('ALMACÉN CENTRAL', 'UTF-8');
+        $grupo = (string) ($almacen->grupo ?? '');
+
+        return $esNombreCentral && $grupo === 'CENTRAL';
+    }
+
+    /**
+     * Datos IE Internos: almacenes no central vía sp_reporte_detalle_interno;
+     * almacén central vía ingresos/egresos (misma lógica que el Excel previo), con filtro EXTERNO.
+     */
+    private function buildIeInternosReporteData($almacens, $partidas, $fecha_ini, $fecha_fin): array
+    {
+        $user = Auth::user();
+        $result = [];
+
+        foreach ($almacens as $almacen) {
+            if ($this->isAlmacenCentralIeInternos($almacen)) {
+                $bloque = $this->buildIeInternosReporteDataCentral($almacen, $partidas, $fecha_ini, $fecha_fin, $user);
+            } else {
+                $bloque = $this->buildIeInternosReporteDataFromSp($almacen, $fecha_ini, $fecha_fin, $user);
+            }
+            if ($bloque !== null) {
+                $result[] = $bloque;
+            }
+        }
+
+        return $result;
+    }
+
+    /**
+     * Agrupa filas del SP por partida y calcula subtotales / totales (columnas G, K, N, Q del reporte legacy).
+     */
+    private function buildIeInternosReporteDataFromSp(Almacen $almacen, $fecha_ini, $fecha_fin, $user): ?array
+    {
+        $filas = DB::select(
+            'CALL sp_reporte_detalle_interno(?, ?, ?)',
+            [$fecha_ini, $fecha_fin, $almacen->id]
+        );
+
+        if ($user->tipo == 'EXTERNO') {
+            $filas = array_values(array_filter($filas, fn ($f) =>
+                (int) ($f->unidad_id ?? 0) === (int) $user->unidad_id
+                && (int) ($f->user_id ?? 0) === (int) $user->id
+            ));
+        }
+
+        if (empty($filas)) {
+            return null;
+        }
+
+        foreach ($filas as $f) {
+            $f->codigo = $f->item_abreviatura ?? '';
+            $f->fecha_display = ! empty($f->fecha_registro)
+                ? date('d/m/Y', strtotime((string) $f->fecha_registro))
+                : '';
+            $f->solo_anterior = (int) ($f->tiene_movimiento_rango ?? 0) === 0;
+        }
+
+        $grouped = [];
+        foreach ($filas as $f) {
+            if ($f->partida_id === null) {
+                continue;
+            }
+            $pid = $f->partida_id;
+            $grouped[$pid]['meta'] = [
+                'id' => $f->partida_id,
+                'nro_partida' => $f->nro_partida,
+                'nombre' => $f->partida_nombre,
+            ];
+            $grouped[$pid]['filas'][] = $f;
+        }
+
+        $tot = [
+            'saldo_ant_total' => 0,
+            'ingreso_total' => 0,
+            'egreso_total' => 0,
+            'saldo_fin_total' => 0,
+        ];
+
+        $partidas_data = [];
+        foreach ($grouped as $pid => $gdata) {
+            $sub = [
+                'saldo_ant_total' => 0,
+                'ingreso_total' => 0,
+                'egreso_total' => 0,
+                'saldo_fin_total' => 0,
+            ];
+
+            foreach ($gdata['filas'] as $row) {
+                $sub['saldo_ant_total'] += (float) ($row->saldo_anterior_total ?? 0);
+                $sub['ingreso_total'] += (float) ($row->ingreso_rango_total ?? 0);
+                $sub['egreso_total'] += (float) ($row->egreso_rango_total ?? 0);
+                $tieneMov = (int) ($row->tiene_movimiento_rango ?? 0) === 1;
+                $sub['saldo_fin_total'] += $tieneMov
+                    ? (float) ($row->saldo_final_total ?? 0)
+                    : (float) ($row->saldo_anterior_total ?? 0);
+            }
+
+            foreach ($sub as $k => $v) {
+                $tot[$k] += $v;
+            }
+
+            $partidas_data[] = [
+                'partida' => $gdata['meta'],
+                'filas' => $gdata['filas'],
+                'subtotal' => $sub,
+            ];
+        }
+
+        if (empty($partidas_data)) {
+            return null;
+        }
+
+        return [
+            'almacen' => ['id' => $almacen->id, 'nombre' => $almacen->nombre],
+            'partidas' => $partidas_data,
+            'totales' => $tot,
+        ];
+    }
+
+    /**
+     * Almacén central (nombre + grupo): misma lógica que el Excel histórico del controlador.
+     */
+    private function buildIeInternosReporteDataCentral(Almacen $almacen, $partidas, $fecha_ini, $fecha_fin, $user): ?array
+    {
+        $tot = [
+            'saldo_ant_total' => 0,
+            'ingreso_total' => 0,
+            'egreso_total' => 0,
+            'saldo_fin_total' => 0,
+        ];
+        $partidas_data = [];
+
+        foreach ($partidas as $partida) {
+            $ingresos = IngresoDetalle::query()
+                ->select('ingreso_detalles.*')
+                ->join('ingresos', 'ingresos.id', '=', 'ingreso_detalles.ingreso_id')
+                ->where('ingresos.almacen_id', $almacen->id)
+                ->where('partida_id', $partida->id)
+                ->with(['unidad_medida', 'producto', 'ingreso', 'egreso']);
+
+            if ($fecha_ini && $fecha_fin) {
+                $ingresos->whereBetween('fecha_registro', [$fecha_ini, $fecha_fin]);
+            }
+            if ($user->tipo == 'EXTERNO') {
+                $ingresos->where('ingresos.unidad_id', $user->unidad_id);
+                $ingresos->where('ingresos.user_id', $user->id);
+            }
+            $ingresos = $ingresos->get();
+
+            $reg_ingresos = collect();
+            if ($fecha_ini && $fecha_fin) {
+                $q = IngresoDetalle::query()
+                    ->select('ingreso_detalles.*')
+                    ->join('ingresos', 'ingresos.id', '=', 'ingreso_detalles.ingreso_id')
+                    ->where('ingresos.almacen_id', $almacen->id)
+                    ->where('fecha_registro', '<', $fecha_ini)
+                    ->where('partida_id', $partida->id)
+                    ->with(['unidad_medida', 'producto', 'ingreso', 'egreso']);
+                if ($user->tipo == 'EXTERNO') {
+                    $q->where('ingresos.unidad_id', $user->unidad_id);
+                    $q->where('ingresos.user_id', $user->id);
+                }
+                $reg_ingresos = $q->get();
+            }
+
+            if ($ingresos->isEmpty() && $reg_ingresos->isEmpty()) {
+                continue;
+            }
+
+            $filas = [];
+            $sub = [
+                'saldo_ant_total' => 0,
+                'ingreso_total' => 0,
+                'egreso_total' => 0,
+                'saldo_fin_total' => 0,
+            ];
+
+            foreach ($ingresos as $ingreso) {
+                $saldo = 0.0;
+                if ($fecha_ini && $fecha_fin) {
+                    $sumReg = IngresoDetalle::query()
+                        ->join('ingresos', 'ingresos.id', '=', 'ingreso_detalles.ingreso_id')
+                        ->where('ingresos.almacen_id', $almacen->id)
+                        ->where('fecha_registro', '<', $fecha_ini)
+                        ->where('partida_id', $partida->id)
+                        ->where('item_id', $ingreso->item_id);
+                    if ($user->tipo == 'EXTERNO') {
+                        $sumReg->where('ingresos.unidad_id', $user->unidad_id);
+                        $sumReg->where('ingresos.user_id', $user->id);
+                    }
+                    $sumReg = (float) $sumReg->sum('ingreso_detalles.total');
+
+                    $regEgr = IngresoDetalle::query()
+                        ->join('ingresos', 'ingresos.id', '=', 'ingreso_detalles.ingreso_id')
+                        ->join('egresos', 'egresos.ingreso_id', '=', 'ingresos.id')
+                        ->where('egresos.almacen_id', $almacen->id)
+                        ->where('egresos.fecha_registro', '<', $fecha_ini)
+                        ->where('egresos.partida_id', $partida->id)
+                        ->where('egresos.item_id', $ingreso->item_id);
+                    if ($user->tipo == 'EXTERNO') {
+                        $regEgr->where('ingresos.unidad_id', $user->unidad_id);
+                        $regEgr->where('ingresos.user_id', $user->id);
+                    }
+                    $regEgr = (float) $regEgr->sum('egresos.total');
+                    $saldo = $sumReg - $regEgr;
+                }
+
+                $egresoTotal = $ingreso->egreso ? (float) $ingreso->egreso->total : 0.0;
+                $saldoFinTotal = $ingreso->egreso ? (float) $ingreso->egreso->s_total : (float) $ingreso->total;
+
+                $row = (object) [
+                    'codigo' => $ingreso->producto->abreviatura,
+                    'unidad_medida_nombre' => $ingreso->unidad_medida->nombre ?? '',
+                    'item_nombre' => $ingreso->producto->nombre ?? '',
+                    'saldo_anterior_total' => $saldo,
+                    'fecha_display' => $ingreso->ingreso->fecha_ingreso_t ?? '',
+                    'ingreso_rango_cantidad' => $ingreso->cantidad,
+                    'ingreso_rango_costo' => $ingreso->costo,
+                    'ingreso_rango_total' => $ingreso->total,
+                    'egreso_rango_cantidad' => $ingreso->egreso ? $ingreso->egreso->cantidad : 0,
+                    'egreso_rango_costo' => $ingreso->egreso ? $ingreso->egreso->costo : 0,
+                    'egreso_rango_total' => $egresoTotal,
+                    'saldo_final_cantidad' => $ingreso->egreso ? $ingreso->egreso->s_cantidad : $ingreso->cantidad,
+                    'saldo_final_costo' => $ingreso->costo,
+                    'saldo_final_total' => $saldoFinTotal,
+                    'solo_anterior' => false,
+                ];
+                $filas[] = $row;
+
+                $sub['saldo_ant_total'] += $saldo;
+                $sub['ingreso_total'] += (float) $ingreso->total;
+                $sub['egreso_total'] += $egresoTotal;
+                $sub['saldo_fin_total'] += $saldoFinTotal;
+            }
+
+            foreach ($reg_ingresos as $rIngreso) {
+                $saldo = (float) $rIngreso->total;
+                if ($rIngreso->egreso) {
+                    $saldo = (float) $rIngreso->total - (float) $rIngreso->egreso->total;
+                }
+                $row = (object) [
+                    'codigo' => $rIngreso->producto->abreviatura,
+                    'unidad_medida_nombre' => $rIngreso->unidad_medida->nombre ?? '',
+                    'item_nombre' => $rIngreso->producto->nombre ?? '',
+                    'saldo_anterior_total' => $saldo,
+                    'fecha_display' => null,
+                    'ingreso_rango_cantidad' => null,
+                    'ingreso_rango_costo' => null,
+                    'ingreso_rango_total' => null,
+                    'egreso_rango_cantidad' => null,
+                    'egreso_rango_costo' => null,
+                    'egreso_rango_total' => null,
+                    'saldo_final_cantidad' => null,
+                    'saldo_final_costo' => null,
+                    'saldo_final_total' => $saldo,
+                    'solo_anterior' => true,
+                ];
+                $filas[] = $row;
+
+                $sub['saldo_ant_total'] += $saldo;
+                $sub['saldo_fin_total'] += $saldo;
+            }
+
+            foreach ($sub as $k => $v) {
+                $tot[$k] += $v;
+            }
+
+            $partidas_data[] = [
+                'partida' => [
+                    'id' => $partida->id,
+                    'nro_partida' => $partida->nro_partida,
+                    'nombre' => $partida->nombre,
+                ],
+                'filas' => $filas,
+                'subtotal' => $sub,
+            ];
+        }
+
+        if (empty($partidas_data)) {
+            return null;
+        }
+
+        return [
+            'almacen' => ['id' => $almacen->id, 'nombre' => $almacen->nombre],
+            'partidas' => $partidas_data,
+            'totales' => $tot,
+        ];
+    }
+
+    /**
+     * Excel IE Internos: una hoja por almacén (mismo criterio que r_bimestral_detalle_excel).
+     */
+    private function r_ie_internos_detalle_excel(array $reporte, $fecha_ini, $fecha_fin, $texto_fecha)
+    {
+        $configuracion = Configuracion::first();
+        $spreadsheet = new Spreadsheet();
+        $spreadsheet->getProperties()
+            ->setCreator('ADMIN')
+            ->setLastModifiedBy('Administración')
+            ->setTitle('IE Internos')
+            ->setSubject('IE Internos')
+            ->setDescription('IE Internos')
+            ->setKeywords('PHPSpreadsheet')
+            ->setCategory('Listado');
+        $spreadsheet->getDefaultStyle()->getFont()->setName('Arial');
+
+        $txt_sd = $fecha_ini ? 'SALDO AL ' . date('d/m/Y', strtotime($fecha_ini)) : 'SALDO ANTERIOR';
+        $txt_sf = $fecha_fin ? 'SALDO AL ' . date('d/m/Y', strtotime($fecha_fin)) : 'SALDO';
+
+        if (empty($reporte)) {
+            $sheet = $spreadsheet->getActiveSheet();
+            $sheet->setTitle('Sin datos');
+            $sheet->setCellValue('A1', 'No hay registros para los filtros seleccionados.');
+        } else {
+            foreach ($reporte as $index => $bloque) {
+                if ($index === 0) {
+                    $sheet = $spreadsheet->getActiveSheet();
+                } else {
+                    $sheet = $spreadsheet->createSheet($index);
+                }
+                $sheet->setTitle(mb_substr($bloque['almacen']['nombre'], 0, 31));
+
+                $fila = 1;
+                if (file_exists(public_path() . '/imgs/' . $configuracion->logo)) {
+                    $drawing = new \PhpOffice\PhpSpreadsheet\Worksheet\Drawing();
+                    $drawing->setName('logo')->setDescription('logo');
+                    $drawing->setPath(public_path() . '/imgs/' . $configuracion->logo);
+                    $drawing->setCoordinates('A1')->setOffsetX(5)->setOffsetY(0)->setHeight(60);
+                    $drawing->setWorksheet($sheet);
+                }
+                $fila = 2;
+
+                foreach ([
+                    $configuracion->razon_social,
+                    'SALDOS INGRESOS Y EGRESOS INTERNO',
+                    $bloque['almacen']['nombre'],
+                    $texto_fecha,
+                ] as $txt) {
+                    $sheet->setCellValue('A' . $fila, $txt);
+                    $sheet->mergeCells("A{$fila}:Q{$fila}");
+                    $sheet->getStyle("A{$fila}:Q{$fila}")->getAlignment()->setHorizontal('center');
+                    $sheet->getStyle("A{$fila}:Q{$fila}")->applyFromArray($this->titulo);
+                    $fila++;
+                }
+                $fila++;
+                $fila++;
+
+                $sheet->setCellValue('A' . $fila, 'N°');
+                $sheet->mergeCells('A' . $fila . ':A' . ($fila + 1));
+                $sheet->setCellValue('B' . $fila, 'CÓDIGO');
+                $sheet->mergeCells('B' . $fila . ':B' . ($fila + 1));
+                $sheet->setCellValue('C' . $fila, 'UNIDAD');
+                $sheet->mergeCells('C' . $fila . ':C' . ($fila + 1));
+                $sheet->setCellValue('D' . $fila, 'DESCRIPCIÓN');
+                $sheet->mergeCells('D' . $fila . ':D' . ($fila + 1));
+                $sheet->setCellValue('E' . $fila, $txt_sd);
+                $sheet->mergeCells("E{$fila}:G{$fila}");
+                $sheet->setCellValue('H' . $fila, 'FECHA INGRESO');
+                $sheet->mergeCells('H' . $fila . ':H' . ($fila + 1));
+                $sheet->setCellValue('I' . $fila, 'INGRESO ALMACENES');
+                $sheet->mergeCells("I{$fila}:K{$fila}");
+                $sheet->setCellValue('L' . $fila, 'SALIDA ALMACENES');
+                $sheet->mergeCells("L{$fila}:N{$fila}");
+                $sheet->setCellValue('O' . $fila, $txt_sf);
+                $sheet->mergeCells("O{$fila}:Q{$fila}");
+                $sheet->getStyle("A{$fila}:Q{$fila}")->applyFromArray($this->headerTabla);
+                $fila++;
+
+                foreach ([
+                    'E' => 'CANT.',
+                    'F' => 'C/U',
+                    'G' => 'TOTAL BS.',
+                    'I' => 'CANT.',
+                    'J' => 'C/U',
+                    'K' => 'TOTAL BS.',
+                    'L' => 'CANT.',
+                    'M' => 'C/U',
+                    'N' => 'TOTAL BS.',
+                    'O' => 'CANT.',
+                    'P' => 'C/U',
+                    'Q' => 'TOTAL BS.',
+                ] as $col => $lbl) {
+                    $sheet->setCellValue($col . $fila, $lbl);
+                }
+                $sheet->getStyle("E{$fila}:Q{$fila}")->applyFromArray($this->headerTabla);
+                $fila++;
+
+                $cont = 1;
+                foreach ($bloque['partidas'] as $pdata) {
+                    $sheet->setCellValue('A' . $fila, 'PARTIDA N° ' . $pdata['partida']['nro_partida']);
+                    $sheet->mergeCells("A{$fila}:D{$fila}");
+                    $sheet->getStyle("A{$fila}:Q{$fila}")->applyFromArray($this->bg1);
+                    $sheet->getStyle("A{$fila}:Q{$fila}")->applyFromArray($this->bodyTabla);
+                    $fila++;
+
+                    foreach ($pdata['filas'] as $f) {
+                        $solo = ! empty($f->solo_anterior);
+                        $sheet->setCellValue('A' . $fila, $cont++);
+                        $sheet->setCellValue('B' . $fila, $f->codigo ?? '');
+                        $sheet->setCellValue('C' . $fila, $f->unidad_medida_nombre ?? '');
+                        $sheet->setCellValue('D' . $fila, $f->item_nombre ?? '');
+                        $sheet->setCellValue('G' . $fila, $f->saldo_anterior_total ?? 0);
+                        if (! $solo) {
+                            $sheet->setCellValue('H' . $fila, $f->fecha_display ?? '');
+                            $sheet->setCellValue('I' . $fila, $f->ingreso_rango_cantidad ?? '');
+                            $sheet->setCellValue('J' . $fila, $f->ingreso_rango_costo ?? '');
+                            $sheet->setCellValue('K' . $fila, $f->ingreso_rango_total ?? '');
+                            $sheet->setCellValue('L' . $fila, $f->egreso_rango_cantidad ?? '');
+                            $sheet->setCellValue('M' . $fila, $f->egreso_rango_costo ?? '');
+                            $sheet->setCellValue('N' . $fila, $f->egreso_rango_total ?? '');
+                            $sheet->setCellValue('O' . $fila, $f->saldo_final_cantidad ?? '');
+                            $sheet->setCellValue('P' . $fila, $f->saldo_final_costo ?? '');
+                            $sheet->setCellValue('Q' . $fila, $f->saldo_final_total ?? '');
+                        } else {
+                            $sheet->setCellValue('H' . $fila, '-');
+                            $sheet->setCellValue('I' . $fila, '-');
+                            $sheet->setCellValue('J' . $fila, '-');
+                            $sheet->setCellValue('K' . $fila, '-');
+                            $sheet->setCellValue('L' . $fila, '-');
+                            $sheet->setCellValue('M' . $fila, '-');
+                            $sheet->setCellValue('N' . $fila, '-');
+                            $sheet->setCellValue('O' . $fila, '-');
+                            $sheet->setCellValue('P' . $fila, '-');
+                            $sheet->setCellValue('Q' . $fila, $f->saldo_anterior_total ?? 0);
+                        }
+                        $sheet->getStyle("A{$fila}:Q{$fila}")->applyFromArray($this->bodyTabla);
+                        $sheet->getStyle("E{$fila}:Q{$fila}")->applyFromArray($this->celdaCenter);
+                        $fila++;
+                    }
+
+                    $sub = $pdata['subtotal'];
+                    $sheet->setCellValue('A' . $fila, 'TOTAL PARTIDA N° ' . $pdata['partida']['nro_partida']);
+                    $sheet->mergeCells("A{$fila}:D{$fila}");
+                    $sheet->setCellValue('G' . $fila, number_format($sub['saldo_ant_total'], 2, '.', ''));
+                    $sheet->setCellValue('K' . $fila, number_format($sub['ingreso_total'], 2, '.', ''));
+                    $sheet->setCellValue('N' . $fila, number_format($sub['egreso_total'], 2, '.', ''));
+                    $sheet->setCellValue('Q' . $fila, number_format($sub['saldo_fin_total'], 2, '.', ''));
+                    $sheet->getStyle("A{$fila}:Q{$fila}")->applyFromArray($this->footerTabla);
+                    $fila++;
+                }
+
+                $tot = $bloque['totales'];
+                $sheet->setCellValue('A' . $fila, 'TOTAL GENERAL');
+                $sheet->mergeCells("A{$fila}:D{$fila}");
+                $sheet->setCellValue('G' . $fila, number_format($tot['saldo_ant_total'], 2, '.', ''));
+                $sheet->setCellValue('K' . $fila, number_format($tot['ingreso_total'], 2, '.', ''));
+                $sheet->setCellValue('N' . $fila, number_format($tot['egreso_total'], 2, '.', ''));
+                $sheet->setCellValue('Q' . $fila, number_format($tot['saldo_fin_total'], 2, '.', ''));
+                $sheet->getStyle("A{$fila}:Q{$fila}")->applyFromArray($this->footerTabla);
+
+                $sheet->getColumnDimension('A')->setWidth(6);
+                $sheet->getColumnDimension('B')->setWidth(20);
+                $sheet->getColumnDimension('C')->setWidth(12);
+                $sheet->getColumnDimension('D')->setWidth(30);
+                foreach (range('E', 'Q') as $col) {
+                    $sheet->getColumnDimension($col)->setWidth(12);
+                }
+                foreach (range('A', 'Q') as $col) {
+                    $sheet->getStyle($col)->getAlignment()->setWrapText(true);
+                }
+                $sheet->getPageSetup()->setOrientation(\PhpOffice\PhpSpreadsheet\Worksheet\PageSetup::ORIENTATION_LANDSCAPE);
+                $sheet->getPageMargins()->setTop(0.5)->setRight(0.1)->setLeft(0.1)->setBottom(0.1);
+                $sheet->getPageSetup()->setPrintArea('A:Q')->setFitToWidth(1)->setFitToHeight(0);
+            }
+        }
+
+        header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        header('Content-Disposition: attachment;filename="ie_internos' . time() . '.xlsx"');
+        header('Cache-Control: max-age=0');
+        $writer = IOFactory::createWriter($spreadsheet, 'Xlsx');
+        $writer->save('php://output');
     }
 }

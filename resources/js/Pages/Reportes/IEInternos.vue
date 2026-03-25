@@ -17,6 +17,7 @@ const form = ref({
     fecha_fin: obtenerFechaActual(),
     tipo: "pdf",
 });
+const formErrors = ref({});
 
 const generando = ref(false);
 const txtBtn = computed(() => {
@@ -33,13 +34,26 @@ const listTipo = ref([
     { value: "excel", label: "EXCEL" },
 ]);
 
-const generarReporte = () => {
+const generarReporte = async () => {
     generando.value = true;
-    const url = route("reportes.r_ie_internos", form.value);
-    window.open(url, "_blank");
-    setTimeout(() => {
+    formErrors.value = {};
+    try {
+        if (form.value.tipo === "pdf") {
+            await axios.get(route("reportes.r_ie_internos"), {
+                params: { ...form.value, validar_pdf: 1 },
+            });
+        }
+        const url = route("reportes.r_ie_internos", form.value);
+        window.open(url, "_blank");
+    } catch (error) {
+        const tipoError =
+            error?.response?.data?.errors?.tipo?.[0] ||
+            error?.response?.data?.message ||
+            "No se puede generar el reporte en PDF por magnitud de datos. Cambie a EXCEL.";
+        formErrors.value.tipo = tipoError;
+    } finally {
         generando.value = false;
-    }, 500);
+    }
 };
 
 const cargarAlmacens = () => {
@@ -76,7 +90,7 @@ onMounted(() => {
                                     placeholder="- Seleccione -"
                                     :class="{
                                         'border border-red rounded':
-                                            form.errors?.almacen_id,
+                                            formErrors.almacen_id,
                                     }"
                                     v-model="form.almacen_id"
                                     filterable
@@ -120,16 +134,19 @@ onMounted(() => {
                                 <label>Seleccionar tipo reporte</label>
                                 <select
                                     :hide-details="
-                                        form.errors?.tipo ? false : true
+                                        formErrors.tipo ? false : true
                                     "
-                                    :error="form.errors?.tipo ? true : false"
+                                    :error="formErrors.tipo ? true : false"
                                     :error-messages="
-                                        form.errors?.tipo
-                                            ? form.errors?.tipo
+                                        formErrors.tipo
+                                            ? formErrors.tipo
                                             : ''
                                     "
                                     v-model="form.tipo"
-                                    class="form-control"
+                                    :class="[
+                                        'form-control',
+                                        { 'border border-danger': formErrors.tipo },
+                                    ]"
                                 >
                                     <option
                                         v-for="item in listTipo"
@@ -138,12 +155,18 @@ onMounted(() => {
                                         {{ item.label }}
                                     </option>
                                 </select>
+                                <small
+                                    v-if="formErrors.tipo"
+                                    class="text-danger d-block mt-1"
+                                >
+                                    {{ formErrors.tipo }}
+                                </small>
                             </div>
                             <div class="col-md-12 text-center mt-3">
                                 <button
+                                    type="submit"
                                     class="btn btn-primary"
                                     block
-                                    @click="generarReporte"
                                     :disabled="generando"
                                     v-text="txtBtn"
                                 ></button>

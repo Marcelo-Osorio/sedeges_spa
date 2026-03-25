@@ -144,25 +144,41 @@ class ReporteController extends Controller
 
         $usuarios = $usuarios->orderBy("id", "ASC")->get();
 
-        $aproxDatos = count($usuarios);
-        try {
-            $pdf = PDF::loadView('reportes.usuarios', compact('usuarios'))->setPaper('legal', 'landscape');
+        $pdf = PDF::loadView('reportes.usuarios', compact('usuarios'))->setPaper('legal', 'landscape');
 
-            // ENUMERAR LAS PÁGINAS USANDO CANVAS
-            $pdf->output();
-            $dom_pdf = $pdf->getDomPDF();
-            $canvas = $dom_pdf->get_canvas();
-            $alto = $canvas->get_height();
-            $ancho = $canvas->get_width();
-            $canvas->page_text($ancho - 90, $alto - 25, "Página {PAGE_NUM} de {PAGE_COUNT}", null, 9, array(0, 0, 0));
+        // ENUMERAR LAS PÁGINAS USANDO CANVAS
+        $pdf->output();
+        $dom_pdf = $pdf->getDomPDF();
+        $canvas = $dom_pdf->get_canvas();
+        $alto = $canvas->get_height();
+        $ancho = $canvas->get_width();
+        $canvas->page_text($ancho - 90, $alto - 25, "Página {PAGE_NUM} de {PAGE_COUNT}", null, 9, array(0, 0, 0));
 
-            return $pdf->stream('usuarios.pdf');
-        } catch (\Throwable $e) {
-            if ($this->isPdfMemoryOverflow($e)) {
-                return $this->pdfMemoryOverflowResponse($request, 'Usuarios', $aproxDatos, $e, false);
-            }
-            throw $e;
+        return $pdf->stream('usuarios.pdf');
+    }
+
+    private function pdfMaxFilasPermitidas(): int
+    {
+        return 400;
+    }
+
+    private function pdfValidationRejectResponse(Request $request, int $cantidad)
+    {
+        $max = $this->pdfMaxFilasPermitidas();
+        $mensaje = "El reporte no puede imprimirse en PDF por la magnitud de los datos ({$cantidad} registros). "
+            . "Límite permitido para PDF: {$max}. Reduzca el rango de fechas o cambie el tipo de reporte a EXCEL, que es más óptimo.";
+
+        if ($request->boolean('validar_pdf')) {
+            return response()->json([
+                'ok' => false,
+                'errors' => ['tipo' => [$mensaje]],
+                'message' => $mensaje,
+                'cantidad' => $cantidad,
+                'maximo' => $max,
+            ], 422);
         }
+
+        return response($mensaje, 422);
     }
 
     public function bimestral()
@@ -195,67 +211,59 @@ class ReporteController extends Controller
 
         // ── DETALLE: usar stored procedure ──────────────────────────────────
         if ($formato == 'detalle') {
-            $reporte = $this->buildBimestralReporteData($almacens, $fecha_ini, $fecha_fin, $donacion);
+            $detalleData = $this->buildBimestralReporteData($almacens, $fecha_ini, $fecha_fin, $donacion);
+            $reporte = $detalleData['bloques'];
             if ($tipo == 'pdf') {
-                $aproxDatos = 0;
-                foreach ($reporte as $bloque) {
-                    foreach (($bloque['partidas'] ?? []) as $partidaData) {
-                        $aproxDatos += count($partidaData['filas'] ?? []);
-                    }
+                $cantidadDetalle = (int) ($detalleData['cantidad_detalle_pdf'] ?? 0);
+                if ($cantidadDetalle > $this->pdfMaxFilasPermitidas()) {
+                    return $this->pdfValidationRejectResponse($request, $cantidadDetalle);
+                }
+                if ($request->boolean('validar_pdf')) {
+                    return response()->json(['ok' => true, 'cantidad' => $cantidadDetalle], 200);
                 }
 
-                try {
-                    $pdf = PDF::loadView(
-                        'reportes.bimestral_detalle_sp',
-                        compact('reporte', 'fecha_ini', 'fecha_fin', 'texto_fecha', 'configuracion')
-                    )->setPaper('letter', 'landscape');
+                $pdf = PDF::loadView(
+                    'reportes.bimestral_detalle_sp',
+                    compact('reporte', 'fecha_ini', 'fecha_fin', 'texto_fecha', 'configuracion')
+                )->setPaper('letter', 'landscape');
 
-                    $pdf->output();
-                    $dom_pdf = $pdf->getDomPDF();
-                    $canvas  = $dom_pdf->get_canvas();
-                    $alto    = $canvas->get_height();
-                    $ancho   = $canvas->get_width();
-                    $canvas->page_text($ancho - 90, $alto - 25, "Página {PAGE_NUM} de {PAGE_COUNT}", null, 9, [0, 0, 0]);
+                $pdf->output();
+                $dom_pdf = $pdf->getDomPDF();
+                $canvas  = $dom_pdf->get_canvas();
+                $alto    = $canvas->get_height();
+                $ancho   = $canvas->get_width();
+                $canvas->page_text($ancho - 90, $alto - 25, "Página {PAGE_NUM} de {PAGE_COUNT}", null, 9, [0, 0, 0]);
 
-                    return $pdf->stream('bimestral_detalle.pdf');
-                } catch (\Throwable $e) {
-                    if ($this->isPdfMemoryOverflow($e)) {
-                        return $this->pdfMemoryOverflowResponse($request, 'Bimestral (Detalle)', $aproxDatos, $e, true);
-                    }
-                    throw $e;
-                }
+                return $pdf->stream('bimestral_detalle.pdf');
             } else {
                 return $this->r_bimestral_detalle_excel($reporte, $fecha_ini, $fecha_fin, $texto_fecha);
             }
         } else if ($formato == 'resumen') {
             // ── RESUMEN: SP sp_reporte_resumen por almacén, agrupado por partida ──
-            $reporteResumen = $this->buildBimestralResumenReporteData($almacens, $fecha_ini, $fecha_fin, $donacion);
+            $resumenData = $this->buildBimestralResumenReporteData($almacens, $fecha_ini, $fecha_fin, $donacion);
+            $reporteResumen = $resumenData['bloques'];
 
             if ($tipo == 'pdf') {
-                $aproxDatos = 0;
-                foreach ($reporteResumen as $bloque) {
-                    $aproxDatos += count($bloque['partidas'] ?? []);
+                $cantidadResumen = (int) ($resumenData['cantidad_partidas_pdf'] ?? 0);
+                if ($cantidadResumen > $this->pdfMaxFilasPermitidas()) {
+                    return $this->pdfValidationRejectResponse($request, $cantidadResumen);
+                }
+                if ($request->boolean('validar_pdf')) {
+                    return response()->json(['ok' => true, 'cantidad' => $cantidadResumen], 200);
                 }
 
-                try {
-                    $pdf = PDF::loadView(
-                        'reportes.bimestral_resumen_sp',
-                        compact('reporteResumen', 'texto_fecha', 'configuracion')
-                    )->setPaper('letter', 'portrait');
+                $pdf = PDF::loadView(
+                    'reportes.bimestral_resumen_sp',
+                    compact('reporteResumen', 'texto_fecha', 'configuracion')
+                )->setPaper('letter', 'portrait');
 
-                    $pdf->output();
-                    $dom_pdf = $pdf->getDomPDF();
-                    $canvas  = $dom_pdf->get_canvas();
-                    $alto    = $canvas->get_height();
-                    $ancho   = $canvas->get_width();
-                    $canvas->page_text($ancho - 90, $alto - 25, "Página {PAGE_NUM} de {PAGE_COUNT}", null, 9, [0, 0, 0]);
-                    return $pdf->stream('bimestral_resumen.pdf');
-                } catch (\Throwable $e) {
-                    if ($this->isPdfMemoryOverflow($e)) {
-                        return $this->pdfMemoryOverflowResponse($request, 'Bimestral (Resumen)', $aproxDatos, $e, true);
-                    }
-                    throw $e;
-                }
+                $pdf->output();
+                $dom_pdf = $pdf->getDomPDF();
+                $canvas  = $dom_pdf->get_canvas();
+                $alto    = $canvas->get_height();
+                $ancho   = $canvas->get_width();
+                $canvas->page_text($ancho - 90, $alto - 25, "Página {PAGE_NUM} de {PAGE_COUNT}", null, 9, [0, 0, 0]);
+                return $pdf->stream('bimestral_resumen.pdf');
             } else {
                 return $this->r_bimestral_resumen_excel($reporteResumen, $texto_fecha);
             }
@@ -275,6 +283,7 @@ class ReporteController extends Controller
     {
         $user   = Auth::user();
         $result = [];
+        $cantidadDetallePdf = 0;
 
         foreach ($almacens as $almacen) {
             // Una sola llamada al SP por almacén
@@ -357,6 +366,7 @@ class ReporteController extends Controller
                     'filas'    => $gdata['filas'],
                     'subtotal' => $sub,
                 ];
+                $cantidadDetallePdf += count($gdata['filas']);
             }
 
             $result[] = [
@@ -366,7 +376,10 @@ class ReporteController extends Controller
             ];
         }
 
-        return $result;
+        return [
+            'bloques' => $result,
+            'cantidad_detalle_pdf' => $cantidadDetallePdf,
+        ];
     }
 
     /**
@@ -578,6 +591,7 @@ class ReporteController extends Controller
     {
         $user   = Auth::user();
         $reporteResumen = [];
+        $cantidadPartidasPdf = 0;
         foreach ($almacens as $almacen) {
             $filas = \Illuminate\Support\Facades\DB::select(
                 'CALL sp_reporte_resumen(?, ?, ?, ?, ?, ?, ?)',
@@ -607,8 +621,12 @@ class ReporteController extends Controller
                 'partidas' => $filas,
                 'totales' => $totales
             ];
+            $cantidadPartidasPdf += count($filas);
         }
-        return $reporteResumen;
+        return [
+            'bloques' => $reporteResumen,
+            'cantidad_partidas_pdf' => $cantidadPartidasPdf,
+        ];
     }
 
     /**
@@ -838,6 +856,7 @@ class ReporteController extends Controller
     {
         $user   = Auth::user();
         $result = [];
+        $cantidadDetallePdf = 0;
 
         foreach ($almacens as $almacen) {
             $filas = \Illuminate\Support\Facades\DB::select(
@@ -911,6 +930,7 @@ class ReporteController extends Controller
                     'filas'    => $gdata['filas'],
                     'subtotal' => $sub,
                 ];
+                $cantidadDetallePdf += count($gdata['filas']);
             }
 
             $result[] = [
@@ -920,7 +940,10 @@ class ReporteController extends Controller
             ];
         }
 
-        return $result;
+        return [
+            'bloques' => $result,
+            'cantidad_detalle_pdf' => $cantidadDetallePdf,
+        ];
     }
 
     /**
@@ -930,6 +953,7 @@ class ReporteController extends Controller
     {
         $user   = Auth::user();
         $reporteResumen = [];
+        $cantidadPartidasPdf = 0;
         foreach ($almacens as $almacen) {
             $filas = \Illuminate\Support\Facades\DB::select(
                 'CALL sp_reporte_resumen(?, ?, ?, ?, ?, ?, ?)',
@@ -959,8 +983,12 @@ class ReporteController extends Controller
                 'partidas' => $filas,
                 'totales' => $totales
             ];
+            $cantidadPartidasPdf += count($filas);
         }
-        return $reporteResumen;
+        return [
+            'bloques' => $reporteResumen,
+            'cantidad_partidas_pdf' => $cantidadPartidasPdf,
+        ];
     }
 
     /**
@@ -1464,55 +1492,47 @@ class ReporteController extends Controller
         $configuracion = \App\Models\Configuracion::first();
 
         if ($formato == 'detalle') {
-            $reporte = $this->buildCuatrimestralReporteData($almacens, $fecha_ini, $fecha_fin, $donacion);
+            $detalleData = $this->buildCuatrimestralReporteData($almacens, $fecha_ini, $fecha_fin, $donacion);
+            $reporte = $detalleData['bloques'];
             if ($tipo == 'pdf') {
-                $aproxDatos = 0;
-                foreach ($reporte as $bloque) {
-                    foreach (($bloque['partidas'] ?? []) as $partidaData) {
-                        $aproxDatos += count($partidaData['filas'] ?? []);
-                    }
+                $cantidadDetalle = (int) ($detalleData['cantidad_detalle_pdf'] ?? 0);
+                if ($cantidadDetalle > $this->pdfMaxFilasPermitidas()) {
+                    return $this->pdfValidationRejectResponse($request, $cantidadDetalle);
+                }
+                if ($request->boolean('validar_pdf')) {
+                    return response()->json(['ok' => true, 'cantidad' => $cantidadDetalle], 200);
                 }
 
-                try {
-                    $pdf = PDF::loadView('reportes.cuatrimestral_detalle_sp', compact('reporte', 'fecha_ini', 'fecha_fin', 'texto_fecha', 'configuracion'))->setPaper('letter', 'landscape');
-                    $pdf->output();
-                    $dom_pdf = $pdf->getDomPDF();
-                    $canvas = $dom_pdf->get_canvas();
-                    $alto = $canvas->get_height();
-                    $ancho = $canvas->get_width();
-                    $canvas->page_text($ancho - 90, $alto - 25, "Página {PAGE_NUM} de {PAGE_COUNT}", null, 9, [0, 0, 0]);
-                    return $pdf->stream('cuatrimestral_detalle.pdf');
-                } catch (\Throwable $e) {
-                    if ($this->isPdfMemoryOverflow($e)) {
-                        return $this->pdfMemoryOverflowResponse($request, 'Cuatrimestral (Detalle)', $aproxDatos, $e, true);
-                    }
-                    throw $e;
-                }
+                $pdf = PDF::loadView('reportes.cuatrimestral_detalle_sp', compact('reporte', 'fecha_ini', 'fecha_fin', 'texto_fecha', 'configuracion'))->setPaper('letter', 'landscape');
+                $pdf->output();
+                $dom_pdf = $pdf->getDomPDF();
+                $canvas = $dom_pdf->get_canvas();
+                $alto = $canvas->get_height();
+                $ancho = $canvas->get_width();
+                $canvas->page_text($ancho - 90, $alto - 25, "Página {PAGE_NUM} de {PAGE_COUNT}", null, 9, [0, 0, 0]);
+                return $pdf->stream('cuatrimestral_detalle.pdf');
             }
             return $this->r_cuatrimestral_detalle_excel($reporte, $fecha_ini, $fecha_fin, $texto_fecha);
         } else if ($formato == 'resumen') {
-            $reporteResumen = $this->buildCuatrimestralResumenReporteData($almacens, $fecha_ini, $fecha_fin, $donacion);
+            $resumenData = $this->buildCuatrimestralResumenReporteData($almacens, $fecha_ini, $fecha_fin, $donacion);
+            $reporteResumen = $resumenData['bloques'];
             if ($tipo == 'pdf') {
-                $aproxDatos = 0;
-                foreach ($reporteResumen as $bloque) {
-                    $aproxDatos += count($bloque['partidas'] ?? []);
+                $cantidadResumen = (int) ($resumenData['cantidad_partidas_pdf'] ?? 0);
+                if ($cantidadResumen > $this->pdfMaxFilasPermitidas()) {
+                    return $this->pdfValidationRejectResponse($request, $cantidadResumen);
+                }
+                if ($request->boolean('validar_pdf')) {
+                    return response()->json(['ok' => true, 'cantidad' => $cantidadResumen], 200);
                 }
 
-                try {
-                    $pdf = PDF::loadView('reportes.cuatrimestral_resumen_sp', compact('reporteResumen', 'texto_fecha', 'configuracion'))->setPaper('letter', 'portrait');
-                    $pdf->output();
-                    $dom_pdf = $pdf->getDomPDF();
-                    $canvas = $dom_pdf->get_canvas();
-                    $alto = $canvas->get_height();
-                    $ancho = $canvas->get_width();
-                    $canvas->page_text($ancho - 90, $alto - 25, "Página {PAGE_NUM} de {PAGE_COUNT}", null, 9, [0, 0, 0]);
-                    return $pdf->stream('cuatrimestral_resumen.pdf');
-                } catch (\Throwable $e) {
-                    if ($this->isPdfMemoryOverflow($e)) {
-                        return $this->pdfMemoryOverflowResponse($request, 'Cuatrimestral (Resumen)', $aproxDatos, $e, true);
-                    }
-                    throw $e;
-                }
+                $pdf = PDF::loadView('reportes.cuatrimestral_resumen_sp', compact('reporteResumen', 'texto_fecha', 'configuracion'))->setPaper('letter', 'portrait');
+                $pdf->output();
+                $dom_pdf = $pdf->getDomPDF();
+                $canvas = $dom_pdf->get_canvas();
+                $alto = $canvas->get_height();
+                $ancho = $canvas->get_width();
+                $canvas->page_text($ancho - 90, $alto - 25, "Página {PAGE_NUM} de {PAGE_COUNT}", null, 9, [0, 0, 0]);
+                return $pdf->stream('cuatrimestral_resumen.pdf');
             }
             return $this->r_cuatrimestral_resumen_excel($reporteResumen, $texto_fecha);
         }
@@ -1724,22 +1744,14 @@ class ReporteController extends Controller
         $configuracion       = \App\Models\Configuracion::first();
 
         if ($tipo == 'pdf') {
-            $aproxDatos = count($reporteConciliacion['partidas'] ?? []);
-            try {
-                $pdf = PDF::loadView('reportes.conciliacion_sp', compact('reporteConciliacion', 'texto_fecha', 'configuracion', 'fecha_ini'))->setPaper('letter', 'landscape');
-                $pdf->output();
-                $dom_pdf = $pdf->getDomPDF();
-                $canvas = $dom_pdf->get_canvas();
-                $alto = $canvas->get_height();
-                $ancho = $canvas->get_width();
-                $canvas->page_text($ancho - 90, $alto - 25, "Página {PAGE_NUM} de {PAGE_COUNT}", null, 9, [0, 0, 0]);
-                return $pdf->stream('conciliacion.pdf');
-            } catch (\Throwable $e) {
-                if ($this->isPdfMemoryOverflow($e)) {
-                    return $this->pdfMemoryOverflowResponse($request, 'Conciliación', $aproxDatos, $e, true);
-                }
-                throw $e;
-            }
+            $pdf = PDF::loadView('reportes.conciliacion_sp', compact('reporteConciliacion', 'texto_fecha', 'configuracion', 'fecha_ini'))->setPaper('letter', 'landscape');
+            $pdf->output();
+            $dom_pdf = $pdf->getDomPDF();
+            $canvas = $dom_pdf->get_canvas();
+            $alto = $canvas->get_height();
+            $ancho = $canvas->get_width();
+            $canvas->page_text($ancho - 90, $alto - 25, "Página {PAGE_NUM} de {PAGE_COUNT}", null, 9, [0, 0, 0]);
+            return $pdf->stream('conciliacion.pdf');
         }
 
         return $this->r_conciliacion_excel($reporteConciliacion, $texto_fecha, $fecha_ini);
@@ -1755,49 +1767,6 @@ class ReporteController extends Controller
         }
 
         return $texto_fecha;
-    }
-
-    private function isPdfMemoryOverflow(\Throwable $e): bool
-    {
-        $msg = (string) ($e->getMessage() ?? '');
-        if ($msg === '') {
-            return false;
-        }
-
-        return str_contains($msg, 'Allowed memory size') ||
-            str_contains($msg, 'Cellmap.php') ||
-            (str_contains(strtolower($msg), 'memory') && str_contains(strtolower($msg), 'exhaust'));
-    }
-
-    private function pdfMemoryOverflowResponse(
-        Request $request,
-        string $reporteLabel,
-        ?int $aproxDatos,
-        \Throwable $e,
-        bool $buildExcelLink
-    ) {
-        $params = $request->query();
-        $excelUrl = null;
-
-        if ($buildExcelLink) {
-            $params['tipo'] = 'excel';
-            $excelUrl = $request->url() . (count($params) ? ('?' . http_build_query($params)) : '');
-        }
-
-        $errorMsg = mb_substr((string) ($e->getMessage() ?? ''), 0, 500);
-
-        $mensaje = 'La generación de PDF excedió el límite de recursos (dompdf) para renderizar tantos datos.';
-        if ($aproxDatos !== null) {
-            $mensaje .= ' Cantidad aproximada de datos: ' . number_format($aproxDatos, 0, '.', ',') . '.';
-        }
-        $mensaje .= ' Por favor genere el reporte en EXCEL (o reduzca la cantidad de datos).';
-
-        return response()->view('reportes.pdf_overflow', [
-            'reporteLabel' => $reporteLabel,
-            'mensaje' => $mensaje,
-            'excelUrl' => $excelUrl,
-            'error' => $errorMsg,
-        ], 413);
     }
 
     public function ie_internos()
@@ -1827,42 +1796,36 @@ class ReporteController extends Controller
         $configuracion = Configuracion::first();
         $almacens = $almacens->get();
 
-        $reporte = $this->buildIeInternosReporteData($almacens, $partidas, $fecha_ini, $fecha_fin);
-
-        $nFilas = 0;
-        foreach ($reporte as $bloque) {
-            foreach ($bloque['partidas'] as $p) {
-                $nFilas += count($p['filas']);
-            }
-        }
-        $aproxDatos = max(1, $nFilas);
+        $detalleData = $this->buildIeInternosReporteData($almacens, $partidas, $fecha_ini, $fecha_fin);
+        $reporte = $detalleData['bloques'];
 
         if ($tipo == 'pdf') {
             $orientacion = $formato == 'detalle' ? 'landscape' : 'portrait';
-
-            try {
-                $pdf = PDF::loadView(
-                    'reportes.ie_internos_sp',
-                    compact('reporte', 'fecha_ini', 'fecha_fin', 'texto_fecha', 'configuracion')
-                )->setPaper('letter', $orientacion);
-
-                $pdf->output();
-                $dom_pdf = $pdf->getDomPDF();
-                $canvas = $dom_pdf->get_canvas();
-                $alto = $canvas->get_height();
-                $ancho = $canvas->get_width();
-                $canvas->page_text($ancho - 90, $alto - 25, 'Página {PAGE_NUM} de {PAGE_COUNT}', null, 9, [0, 0, 0]);
-
-                return $pdf->stream('ie_internos.pdf');
-            } catch (\Throwable $e) {
-                if ($this->isPdfMemoryOverflow($e)) {
-                    return $this->pdfMemoryOverflowResponse($request, 'IE Internos', $aproxDatos, $e, true);
-                }
-                throw $e;
+            $cantidadPdf = (int) ($detalleData['cantidad_detalle_pdf'] ?? 0);
+            if ($cantidadPdf > $this->pdfMaxFilasPermitidas()) {
+                return $this->pdfValidationRejectResponse($request, $cantidadPdf);
             }
-        }
+            if ($request->boolean('validar_pdf')) {
+                return response()->json(['ok' => true, 'cantidad' => $cantidadPdf], 200);
+            }
 
-        return $this->r_ie_internos_detalle_excel($reporte, $fecha_ini, $fecha_fin, $texto_fecha);
+            $pdf = PDF::loadView(
+                'reportes.ie_internos_sp',
+                compact('reporte', 'fecha_ini', 'fecha_fin', 'texto_fecha', 'configuracion')
+            )->setPaper('letter', $orientacion);
+
+            $pdf->output();
+            $dom_pdf = $pdf->getDomPDF();
+            $canvas = $dom_pdf->get_canvas();
+            $alto = $canvas->get_height();
+            $ancho = $canvas->get_width();
+            $canvas->page_text($ancho - 90, $alto - 25, 'Página {PAGE_NUM} de {PAGE_COUNT}', null, 9, [0, 0, 0]);
+
+            return $pdf->stream('ie_internos.pdf');
+        }
+        else {
+            return $this->r_ie_internos_detalle_excel($reporte, $fecha_ini, $fecha_fin, $texto_fecha);
+        }
     }
 
     /**
@@ -1885,6 +1848,7 @@ class ReporteController extends Controller
     {
         $user = Auth::user();
         $result = [];
+        $cantidadDetallePdf = 0;
 
         foreach ($almacens as $almacen) {
             if ($this->isAlmacenCentralIeInternos($almacen)) {
@@ -1894,10 +1858,16 @@ class ReporteController extends Controller
             }
             if ($bloque !== null) {
                 $result[] = $bloque;
+                foreach (($bloque['partidas'] ?? []) as $p) {
+                    $cantidadDetallePdf += count($p['filas'] ?? []);
+                }
             }
         }
 
-        return $result;
+        return [
+            'bloques' => $result,
+            'cantidad_detalle_pdf' => $cantidadDetallePdf,
+        ];
     }
 
     /**

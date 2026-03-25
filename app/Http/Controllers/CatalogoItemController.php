@@ -35,6 +35,16 @@ class CatalogoItemController extends Controller
         ]);
     }
 
+    public function grupos()
+    {
+        $grupos = CatalogoItem::select("grupo")
+            ->whereNotNull("grupo")
+            ->where("grupo", "!=", "")
+            ->distinct()
+            ->pluck("grupo");
+        return response()->JSON(["grupos" => $grupos]);
+    }
+
     public function api(Request $request)
     {
         $productos = CatalogoItem::select("catalogo_items.*");

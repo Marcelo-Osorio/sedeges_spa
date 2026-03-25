@@ -75,13 +75,13 @@ watch(
                 getInfoAlmacen(form.almacen_id);
             }
         }
-    }
+    },
 );
 watch(
     () => props.accion_dialog,
     (newValue) => {
         accion.value = newValue;
-    }
+    },
 );
 watch(
     () => props.p_almacen_id,
@@ -90,7 +90,7 @@ watch(
             form.almacen_id == props.p_almacen_id;
             getInfoAlmacen(form.almacen_id);
         }
-    }
+    },
 );
 
 const tituloDialog = computed(() => {
@@ -136,8 +136,8 @@ const enviarFormulario = () => {
                     flash.error
                         ? flash.error
                         : err.error
-                        ? err.error
-                        : "Hay errores en el formulario"
+                          ? err.error
+                          : "Hay errores en el formulario"
                 }`,
                 confirmButtonColor: "#3085d6",
                 confirmButtonText: `Aceptar`,

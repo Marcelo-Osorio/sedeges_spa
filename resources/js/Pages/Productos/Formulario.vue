@@ -1,7 +1,8 @@
 <script setup>
 import { useForm, usePage } from "@inertiajs/vue3";
 import { useProductos } from "@/composables/productos/useProductos";
-import { watch, ref, computed, defineEmits, onMounted, nextTick } from "vue";
+import { watch, ref, computed, defineEmits, onMounted } from "vue";
+
 const props = defineProps({
     open_dialog: {
         type: Boolean,
@@ -26,6 +27,42 @@ const accion = ref(props.accion_dialog);
 const dialog = ref(props.open_dialog);
 let form = useForm(oProducto.value);
 let switcheryInstance = null;
+
+// ── Grupos ─────────────────────────────────────────────────────────────────
+const gruposDisponibles = ref([]);
+const grupoEscritoManual = ref(false); // true cuando el usuario eligió "escribir nuevo"
+
+const cargarGrupos = async () => {
+    try {
+        const res = await axios.get(route("productos.grupos"));
+        gruposDisponibles.value = res.data.grupos ?? [];
+    } catch (e) {
+        console.error("No se pudieron cargar los grupos", e);
+    }
+};
+
+/**
+ * Cuando el select cambia:
+ *   "__nuevo__" → activa modo manual y limpia el valor del form
+ *   cualquier otro → copia directo al form y desactiva modo manual
+ */
+const onSelectGrupo = (e) => {
+    const val = e.target.value;
+    if (val === "__nuevo__") {
+        grupoEscritoManual.value = true;
+        form.grupo = "";
+    } else {
+        grupoEscritoManual.value = false;
+        form.grupo = val;
+    }
+};
+
+const cancelarGrupoManual = () => {
+    grupoEscritoManual.value = false;
+    form.grupo = "";
+};
+// ───────────────────────────────────────────────────────────────────────────
+
 watch(
     () => props.open_dialog,
     async (newValue) => {
@@ -35,14 +72,16 @@ watch(
                 .getElementsByTagName("body")[0]
                 .classList.add("modal-open");
             form = useForm(oProducto.value);
+            grupoEscritoManual.value = false;
+            await cargarGrupos();
         }
-    }
+    },
 );
 watch(
     () => props.accion_dialog,
     (newValue) => {
         accion.value = newValue;
-    }
+    },
 );
 
 const { flash } = usePage().props;
@@ -132,8 +171,8 @@ const enviarFormulario = () => {
                         flash.error
                             ? flash.error
                             : err.error
-                            ? err.error
-                            : "Hay errores en el formulario"
+                              ? err.error
+                              : "Hay errores en el formulario"
                     }`,
                     confirmButtonColor: "#3085d6",
                     confirmButtonText: `Aceptar`,
@@ -158,7 +197,9 @@ const cerrarDialog = () => {
     }
 };
 
-onMounted(() => {});
+onMounted(() => {
+    cargarGrupos();
+});
 </script>
 
 <template>
@@ -204,18 +245,63 @@ onMounted(() => {});
                                     </li>
                                 </ul>
                             </div>
+
+                            <!-- ── Campo Grupo (combo editable) ── -->
                             <div class="col-md-3 mb-2">
                                 <label>Grupo</label>
-                                <select
-                                    class="form-control"
-                                    v-model="form.grupo"
-                                >
-                                    <option value="">- Seleccione -</option>
-                                    <option value="PRODUCTOS">PRODUCTOS</option>
-                                    <option value="TRAMITES">TRAMITES</option>
-                                    <option value="REGISTROS">REGISTROS</option>
-                                </select>
+
+                                <!-- Modo SELECT: muestra opciones de la BD -->
+                                <template v-if="!grupoEscritoManual">
+                                    <select
+                                        class="form-control"
+                                        :value="form.grupo"
+                                        @change="onSelectGrupo"
+                                    >
+                                        <option value="">- Seleccione -</option>
+                                        <option
+                                            v-for="g in gruposDisponibles"
+                                            :key="g"
+                                            :value="g"
+                                        >
+                                            {{ g }}
+                                        </option>
+                                        <option value="__nuevo__">
+                                            ✏️ Escribir nuevo grupo...
+                                        </option>
+                                    </select>
+                                </template>
+
+                                <!-- Modo INPUT LIBRE: el usuario escribe un nuevo grupo -->
+                                <template v-else>
+                                    <div class="input-group">
+                                        <input
+                                            type="text"
+                                            class="form-control"
+                                            v-model="form.grupo"
+                                            placeholder="Escribe el nombre del grupo"
+                                            style="text-transform: uppercase"
+                                        />
+                                        <button
+                                            type="button"
+                                            class="btn btn-outline-secondary"
+                                            title="Volver al selector"
+                                            @click="cancelarGrupoManual"
+                                        >
+                                            <i class="fa fa-arrow-left"></i>
+                                        </button>
+                                    </div>
+                                    <small class="text-muted">
+                                        Escribe el nuevo grupo y guarda.
+                                        <a
+                                            href="javascript:;"
+                                            @click="cancelarGrupoManual"
+                                            >Volver al listado</a
+                                        >
+                                    </small>
+                                </template>
                             </div>
+                            <!-- ────────────────────────────────── -->
+
                             <div class="col-md-3 mb-2">
                                 <label>Abreviatura</label>
                                 <input

@@ -67,6 +67,41 @@ class CatalogoItemController extends Controller
         ]);
     }
 
+    public function para_formulario(Request $request)
+    {
+        $limit = $request->limit ? (int)$request->limit : 10;
+        $offset = $request->offset ? (int)$request->offset : 0;
+        $search = $request->search;
+        $grupo = $request->grupo;
+        $sin_asociados = $request->sin_asociados;
+
+        $productos = CatalogoItem::select("catalogo_items.*");
+
+        if (trim($search) != "") {
+            $term = mb_strtolower(trim($search));
+            $term_regexp = str_replace(' ', '.*', $term);
+            $productos->whereRaw("LOWER(nombre) REGEXP ?", [$term_regexp]);
+        }
+
+        if (trim($grupo) != "") {
+            $productos->where("grupo", $grupo);
+        }
+
+        if ($sin_asociados == 'true' || $sin_asociados === true || $sin_asociados == '1') {
+            $productos->whereNotIn('id', function($query) {
+                $query->select('item_id')->from('ingreso_detalles')->whereNotNull('item_id');
+            });
+        }
+
+        $total = $productos->count();
+        $productos = $productos->offset($offset)->limit($limit)->get();
+
+        return response()->json([
+            "productos" => $productos,
+            "total" => $total
+        ]);
+    }
+
     public function store(Request $request)
     {
         $request->validate($this->validacion, $this->mensajes);

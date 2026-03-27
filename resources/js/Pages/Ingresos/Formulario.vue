@@ -37,12 +37,19 @@ const dialog = ref(props.open_dialog);
 let form = useForm(oIngreso.value);
 const listAlmacens = ref([]);
 const listPartidas = ref([]);
-const listProductos = ref([]);
-const listUnidadMedidas = ref([]);
-const listUnidads = ref([]);
-const listProgramas = ref([]);
 const oAlmacen = ref(null);
 const oUnidad = ref(null);
+
+const searchProducto = ref("");
+const grupoProducto = ref("");
+const sinRegistroAsociado = ref(false);
+const currentPage = ref(1);
+const itemsPerPage = ref(10);
+const totalProductos = ref(0);
+const productosPaginados = ref([]);
+const listGrupos = ref([]);
+const productosCache = ref({});
+const listUnidadMedidas = ref({});
 
 watch(
     () => props.open_dialog,
@@ -171,10 +178,96 @@ const cargarPartidas = () => {
     });
 };
 
-const cargarProductos = () => {
-    axios.get(route("productos.listado")).then((response) => {
-        listProductos.value = response.data.productos;
+const cargarGrupos = () => {
+    axios.get(route("productos.grupos")).then((response) => {
+        listGrupos.value = response.data.grupos;
     });
+};
+
+const cargarProductosPaginados = async (page = 1) => {
+    currentPage.value = page;
+    const offset = (page - 1) * itemsPerPage.value;
+    const hasFilters =
+        searchProducto.value.trim() !== "" ||
+        grupoProducto.value.trim() !== "" ||
+        sinRegistroAsociado.value;
+    if (!hasFilters && productosCache.value[page]) {
+        productosPaginados.value = productosCache.value[page].data;
+        totalProductos.value = productosCache.value[page].total;
+        return;
+    }
+    try {
+        const response = await axios.get(route("productos.para_formulario"), {
+            params: {
+                limit: itemsPerPage.value,
+                offset: offset,
+                search: searchProducto.value,
+                grupo: grupoProducto.value,
+                sin_asociados: sinRegistroAsociado.value ? 1 : 0,
+            },
+        });
+        productosPaginados.value = response.data.productos;
+        totalProductos.value = response.data.total;
+        if (!hasFilters) {
+            productosCache.value[page] = {
+                data: response.data.productos,
+                total: response.data.total,
+            };
+        }
+    } catch (error) {
+        console.error("Error al cargar productos", error);
+    }
+};
+
+watch([searchProducto, grupoProducto, sinRegistroAsociado], () => {
+    cargarProductosPaginados(1);
+});
+
+const totalPages = computed(() =>
+    Math.ceil(totalProductos.value / itemsPerPage.value),
+);
+
+const pagesArray = computed(() => {
+    let pages = [];
+    let startPage = Math.max(1, currentPage.value - 9);
+    let endPage = startPage + 19;
+    if (endPage > totalPages.value) {
+        endPage = totalPages.value;
+        startPage = Math.max(1, endPage - 19);
+    }
+    for (let i = startPage; i <= endPage; i++) {
+        pages.push(i);
+    }
+    return pages;
+});
+
+const goToPage = (p) => {
+    if (p >= 1 && p <= totalPages.value) {
+        cargarProductosPaginados(p);
+    }
+};
+
+const seleccionarProducto = (item_prod) => {
+    form.ingreso_detalles.unshift({
+        id: 0,
+        partida_id: "",
+        donacion: "",
+        item_id: item_prod.id,
+        producto: { nombre: item_prod.nombre },
+        unidad_medida_id: "",
+        cantidad: "",
+        costo: "",
+        total: 0,
+        egreso: null,
+    });
+};
+
+const highlightText = (text, search) => {
+    if (!search || !text) return text;
+    const term = search.trim();
+    if (!term) return text;
+    const regex = new RegExp(`(${term.replace(/\s+/g, "|")})`, "gi");
+    return text.replace(regex, "<mark>$1</mark>");
 };
 
 const cargarUnidadMedidas = () => {
@@ -252,10 +345,11 @@ const agregarProducto = () => {
 const cargarListas = () => {
     cargarAlmacens();
     cargarPartidas();
-    cargarProductos();
     cargarUnidadMedidas();
     cargarUnidads();
     cargarProgramas();
+    cargarGrupos();
+    cargarProductosPaginados(1);
 };
 
 const agregaFila = () => {
@@ -350,7 +444,10 @@ onMounted(() => {});
                                     </li>
                                 </ul>
                             </div>
-                            <div class="col-md-4 mb-2">
+                            <div
+                                class="col-md-4 mb-2"
+                                v-if="form.donacion !== ''"
+                            >
                                 <label>
                                     <span v-if="form.donacion == 'SI'"
                                         >Otorgado por*</span
@@ -532,7 +629,10 @@ onMounted(() => {});
                                     </li>
                                 </ul>
                             </div>
-                            <div class="col-md-4 mb-2">
+                            <div
+                                class="col-md-4 mb-2"
+                                v-if="form.donacion !== ''"
+                            >
                                 <label>
                                     <span v-if="form.donacion == 'SI'"
                                         >Recepción de*</span
@@ -605,16 +705,177 @@ onMounted(() => {});
                                 </ul>
                             </div>
                         </div>
-                        <div class="row mt-2 overflow-auto">
-                            <h4 clas="w-100 text-center">
-                                Productos
-                                <button
-                                    type="button"
-                                    class="btn btn-primary btn-sm"
-                                    @click.prevent="agregaFila"
+                        <div class="row mt-2">
+                            <div class="col-12">
+                                <h4 class="w-100 text-center mb-0">
+                                    Catálogo de Productos
+                                </h4>
+                                <p class="text-center text-muted">
+                                    seleccione un Item o producto para el
+                                    detalle del ingreso
+                                </p>
+                                <h6 class="mt-3">
+                                    Aplicar filtros de búsqueda
+                                </h6>
+                                <div class="row mb-3 align-items-end">
+                                    <div class="col-md-3">
+                                        <label>Buscar por nombre</label>
+                                        <input
+                                            type="text"
+                                            class="form-control"
+                                            v-model="searchProducto"
+                                            placeholder="Nombre..."
+                                        />
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label>Grupo</label>
+                                        <el-select
+                                            v-model="grupoProducto"
+                                            filterable
+                                            clearable
+                                            placeholder="Grupo..."
+                                            class="w-100"
+                                        >
+                                            <el-option value=""
+                                                >Todos</el-option
+                                            >
+                                            <el-option
+                                                v-for="g in listGrupos"
+                                                :key="g"
+                                                :value="g"
+                                                :label="g"
+                                                >{{ g }}</el-option
+                                            >
+                                        </el-select>
+                                    </div>
+                                    <div class="col-md-5">
+                                        <div class="form-check">
+                                            <input
+                                                class="form-check-input"
+                                                type="checkbox"
+                                                id="checkSinAsociar"
+                                                v-model="sinRegistroAsociado"
+                                            />
+                                            <label
+                                                class="form-check-label"
+                                                for="checkSinAsociar"
+                                            >
+                                                mostrar productos sin REGISTRAR
+                                            </label>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="table-responsive">
+                                    <table
+                                        class="table table-bordered table-hover bg-white"
+                                    >
+                                        <thead>
+                                            <tr>
+                                                <th>Grupo</th>
+                                                <th>Abreviatura</th>
+                                                <th>Nombre</th>
+                                                <th
+                                                    width="120px"
+                                                    class="text-center"
+                                                >
+                                                    Acciones
+                                                </th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <tr
+                                                v-for="item in productosPaginados"
+                                                :key="item.id"
+                                            >
+                                                <td>{{ item.grupo }}</td>
+                                                <td>{{ item.abreviatura }}</td>
+                                                <td
+                                                    v-html="
+                                                        highlightText(
+                                                            item.nombre,
+                                                            searchProducto,
+                                                        )
+                                                    "
+                                                ></td>
+                                                <td class="text-center">
+                                                    <button
+                                                        type="button"
+                                                        class="btn btn-sm btn-success"
+                                                        @click="
+                                                            seleccionarProducto(
+                                                                item,
+                                                            )
+                                                        "
+                                                    >
+                                                        <i
+                                                            class="fa fa-check"
+                                                        ></i>
+                                                        Seleccionar
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                        </tbody>
+                                        <tfoot
+                                            v-if="
+                                                productosPaginados.length === 0
+                                            "
+                                        >
+                                            <tr>
+                                                <td
+                                                    colspan="4"
+                                                    class="text-center"
+                                                >
+                                                    No hay registros para
+                                                    mostrar
+                                                </td>
+                                            </tr>
+                                        </tfoot>
+                                    </table>
+                                </div>
+                                <div
+                                    class="d-flex justify-content-center mt-2"
+                                    v-if="totalPages > 1"
                                 >
-                                    <i class="fa fa-plus"></i>
-                                </button>
+                                    <button
+                                        type="button"
+                                        class="btn btn-sm btn-outline-primary mx-1"
+                                        :disabled="currentPage === 1"
+                                        @click="goToPage(currentPage - 1)"
+                                    >
+                                        <i class="fa fa-chevron-left"></i>
+                                    </button>
+                                    <button
+                                        type="button"
+                                        class="btn btn-sm mx-1"
+                                        :class="
+                                            p === currentPage
+                                                ? 'btn-primary'
+                                                : 'btn-outline-primary'
+                                        "
+                                        v-for="p in pagesArray"
+                                        :key="p"
+                                        @click="goToPage(p)"
+                                    >
+                                        {{ p }}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        class="btn btn-sm btn-outline-primary mx-1"
+                                        :disabled="currentPage === totalPages"
+                                        @click="goToPage(currentPage + 1)"
+                                    >
+                                        <i class="fa fa-chevron-right"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div
+                            class="row mt-4 overflow-auto"
+                            v-if="form.ingreso_detalles.length > 0"
+                        >
+                            <h4 class="w-100 text-center">
+                                Detalle del ingreso
                             </h4>
                             <div class="col-12">
                                 <table class="table table-striped">
@@ -671,31 +932,25 @@ onMounted(() => {});
                                                 </el-select>
                                             </td>
                                             <td>
-                                                <el-select
-                                                    class="w-100 rounded-0"
-                                                    placeholder="- Seleccione -"
-                                                    :class="{
-                                                        'border border-red':
-                                                            form.errors
-                                                                ?.item_id,
-                                                    }"
-                                                    v-model="item.item_id"
-                                                    filterable
+                                                <div
+                                                    class="form-control"
+                                                    style="
+                                                        background-color: #e9ecef;
+                                                        cursor: not-allowed;
+                                                    "
+                                                    @click="
+                                                        Swal.fire(
+                                                            'Atención',
+                                                            'Solo editable si selecciona desde la tabla',
+                                                            'info',
+                                                        )
+                                                    "
                                                 >
-                                                    <el-option value=""
-                                                        >- Seleccione
-                                                        -</el-option
-                                                    >
-                                                    <el-option
-                                                        v-for="item_prod in listProductos"
-                                                        :value="item_prod.id"
-                                                        :label="
-                                                            item_prod.nombre
-                                                        "
-                                                    >
-                                                        {{ item_prod.nombre }}
-                                                    </el-option>
-                                                </el-select>
+                                                    {{
+                                                        item.producto?.nombre ||
+                                                        "Producto seleccionado"
+                                                    }}
+                                                </div>
                                             </td>
                                             <td>
                                                 <el-select
@@ -828,15 +1083,6 @@ onMounted(() => {});
             </div>
         </div>
     </div>
-
-    <Formulario
-        :open_dialog="open_dialog"
-        :accion_dialog="accion_dialog"
-        @envio-formulario="cargarProductos"
-        :oculta_fondo="false"
-        :url="route('productos.storeJson')"
-        @cerrar-dialog="open_dialog = false"
-    ></Formulario>
 </template>
 
 <style>

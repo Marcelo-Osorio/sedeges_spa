@@ -47,6 +47,8 @@ const currentPage = ref(1);
 const itemsPerPage = ref(10);
 const totalProductos = ref(0);
 const productosPaginados = ref([]);
+const cargandoProductos = ref(false);
+const productosConsultados = ref(false);
 const listGrupos = ref([]);
 const productosCache = ref({});
 const listUnidadMedidas = ref({});
@@ -194,8 +196,14 @@ const cargarProductosPaginados = async (page = 1) => {
     if (!hasFilters && productosCache.value[page]) {
         productosPaginados.value = productosCache.value[page].data;
         totalProductos.value = productosCache.value[page].total;
+        productosConsultados.value = true;
+        cargandoProductos.value = false;
         return;
     }
+    cargandoProductos.value = true;
+    productosConsultados.value = false;
+    productosPaginados.value = [];
+
     try {
         const response = await axios.get(route("productos.para_formulario"), {
             params: {
@@ -206,16 +214,19 @@ const cargarProductosPaginados = async (page = 1) => {
                 sin_asociados: sinRegistroAsociado.value ? 1 : 0,
             },
         });
-        productosPaginados.value = response.data.productos;
-        totalProductos.value = response.data.total;
+        productosPaginados.value = response.data.productos ?? [];
+        totalProductos.value = response.data.total ?? 0;
         if (!hasFilters) {
             productosCache.value[page] = {
-                data: response.data.productos,
-                total: response.data.total,
+                data: response.data.productos ?? [],
+                total: response.data.total ?? 0,
             };
         }
     } catch (error) {
         console.error("Error al cargar productos", error);
+    } finally {
+        cargandoProductos.value = false;
+        productosConsultados.value = true;
     }
 };
 
@@ -783,53 +794,70 @@ onMounted(() => {});
                                             </tr>
                                         </thead>
                                         <tbody>
-                                            <tr
-                                                v-for="item in productosPaginados"
-                                                :key="item.id"
-                                            >
-                                                <td>{{ item.grupo }}</td>
-                                                <td>{{ item.abreviatura }}</td>
-                                                <td
-                                                    v-html="
-                                                        highlightText(
-                                                            item.nombre,
-                                                            searchProducto,
-                                                        )
-                                                    "
-                                                ></td>
-                                                <td class="text-center">
-                                                    <button
-                                                        type="button"
-                                                        class="btn btn-sm btn-success"
-                                                        @click="
-                                                            seleccionarProducto(
-                                                                item,
-                                                            )
-                                                        "
-                                                    >
-                                                        <i
-                                                            class="fa fa-check"
-                                                        ></i>
-                                                        Seleccionar
-                                                    </button>
-                                                </td>
-                                            </tr>
-                                        </tbody>
-                                        <tfoot
-                                            v-if="
-                                                productosPaginados.length === 0
-                                            "
-                                        >
-                                            <tr>
+                                            <tr v-if="cargandoProductos">
                                                 <td
                                                     colspan="4"
-                                                    class="text-center"
+                                                    class="text-center py-4"
+                                                >
+                                                    <i
+                                                        class="fa fa-spinner fa-spin me-2"
+                                                    ></i>
+                                                    Cargando productos...
+                                                </td>
+                                            </tr>
+
+                                            <tr
+                                                v-else-if="
+                                                    productosConsultados &&
+                                                    productosPaginados.length ===
+                                                        0
+                                                "
+                                            >
+                                                <td
+                                                    colspan="4"
+                                                    class="text-center py-4"
                                                 >
                                                     No hay registros para
                                                     mostrar
                                                 </td>
                                             </tr>
-                                        </tfoot>
+
+                                            <template v-else>
+                                                <tr
+                                                    v-for="item in productosPaginados"
+                                                    :key="item.id"
+                                                >
+                                                    <td>{{ item.grupo }}</td>
+                                                    <td>
+                                                        {{ item.abreviatura }}
+                                                    </td>
+                                                    <td
+                                                        v-html="
+                                                            highlightText(
+                                                                item.nombre,
+                                                                searchProducto,
+                                                            )
+                                                        "
+                                                    ></td>
+                                                    <td class="text-center">
+                                                        <button
+                                                            type="button"
+                                                            class="btn btn-sm btn-success"
+                                                            @click="
+                                                                seleccionarProducto(
+                                                                    item,
+                                                                )
+                                                            "
+                                                        >
+                                                            <i
+                                                                class="fa fa-check"
+                                                            ></i>
+                                                            Seleccionar
+                                                        </button>
+                                                    </td>
+                                                </tr>
+                                            </template>
+                                        </tbody>
                                     </table>
                                 </div>
                                 <div

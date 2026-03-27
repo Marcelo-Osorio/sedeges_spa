@@ -113,6 +113,7 @@ class IngresoController extends Controller
         $id_almacens = AlmacenController::getIdAlmacensPermiso(Auth::user());
         $ingresos->whereIn("almacen_id", $id_almacens);
         $ingresos = $ingresos->orderBy("id", "asc")->get();
+
         return response()->JSON(["data" => $ingresos]);
     }
 

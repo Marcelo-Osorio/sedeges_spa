@@ -311,13 +311,13 @@
                                     $sum_reg_ingresos->where('ingresos.almacen_id', $almacen->id);
                                     $sum_reg_ingresos->where('fecha_registro', '<', $fecha_ini);
                                     $sum_reg_ingresos->where('partida_id', $partida->id);
-                                    $sum_reg_ingresos->where('producto_id', $ingreso->producto_id);
+                                    $sum_reg_ingresos->where('item_id', $ingreso->item_id);
 
                                     // EXTERNO
                                     $user = Auth::user();
                                     if ($user->tipo == 'EXTERNO') {
-                                        $ingresos->where('ingresos.unidad_id', $user->unidad_id);
-                                        $ingresos->where('ingresos.user_id', $user->id);
+                                        $sum_reg_ingresos->where('ingresos.unidad_id', $user->unidad_id);
+                                        $sum_reg_ingresos->where('ingresos.user_id', $user->id);
                                     }
 
                                     $sum_reg_ingresos = $sum_reg_ingresos->sum('ingreso_detalles.total');
@@ -329,7 +329,7 @@
                                     $reg_egresos->where('egresos.almacen_id', $almacen->id);
                                     $reg_egresos->where('egresos.fecha_registro', '<', $fecha_ini);
                                     $reg_egresos->where('egresos.partida_id', $partida->id);
-                                    $reg_egresos->where('egresos.producto_id', $ingreso->producto_id);
+                                    $reg_egresos->where('egresos.item_id', $ingreso->item_id);
                                     // EXTERNO
                                     $user = Auth::user();
                                     if ($user->tipo == 'EXTERNO') {

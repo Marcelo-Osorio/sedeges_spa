@@ -2,16 +2,16 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\CatalogoItem;
 use App\Models\HistorialAccion;
-use App\Models\Ingreso;
-use App\Models\Producto;
+use App\Models\IngresoDetalle;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 
-class ProductoController extends Controller
+class CatalogoItemController extends Controller
 {
     public $validacion = [
         "nombre" => "required|min:1",
@@ -29,15 +29,25 @@ class ProductoController extends Controller
 
     public function listado()
     {
-        $productos = Producto::select("productos.*")->get();
+        $productos = CatalogoItem::select("catalogo_items.*")->get();
         return response()->JSON([
             "productos" => $productos
         ]);
     }
 
+    public function grupos()
+    {
+        $grupos = CatalogoItem::select("grupo")
+            ->whereNotNull("grupo")
+            ->where("grupo", "!=", "")
+            ->distinct()
+            ->pluck("grupo");
+        return response()->JSON(["grupos" => $grupos]);
+    }
+
     public function api(Request $request)
     {
-        $productos = Producto::select("productos.*");
+        $productos = CatalogoItem::select("catalogo_items.*");
         $productos = $productos->get();
         return response()->JSON(["data" => $productos]);
     }
@@ -45,7 +55,7 @@ class ProductoController extends Controller
     public function paginado(Request $request)
     {
         $search = $request->search;
-        $productos = Producto::select("productos.*");
+        $productos = CatalogoItem::select("catalogo_items.*");
 
         if (trim($search) != "") {
             $productos->where("nombre", "LIKE", "%$search%");
@@ -57,20 +67,54 @@ class ProductoController extends Controller
         ]);
     }
 
+    public function para_formulario(Request $request)
+    {
+        $limit = $request->limit ? (int)$request->limit : 10;
+        $offset = $request->offset ? (int)$request->offset : 0;
+        $search = $request->search;
+        $grupo = $request->grupo;
+        $sin_asociados = $request->sin_asociados;
+
+        $productos = CatalogoItem::select("catalogo_items.*");
+
+        if (trim($search) != "") {
+            $term = mb_strtolower(trim($search));
+            $term_regexp = str_replace(' ', '.*', $term);
+            $productos->whereRaw("LOWER(nombre) REGEXP ?", [$term_regexp]);
+        }
+
+        if (trim($grupo) != "") {
+            $productos->where("grupo", $grupo);
+        }
+
+        if ($sin_asociados == 'true' || $sin_asociados === true || $sin_asociados == '1') {
+            $productos->whereNotIn('id', function($query) {
+                $query->select('item_id')->from('ingreso_detalles')->whereNotNull('item_id');
+            });
+        }
+
+        $total = $productos->count();
+        $productos = $productos->offset($offset)->limit($limit)->get();
+
+        return response()->json([
+            "productos" => $productos,
+            "total" => $total
+        ]);
+    }
+
     public function store(Request $request)
     {
         $request->validate($this->validacion, $this->mensajes);
         DB::beginTransaction();
         try {
             $request['fecha_registro'] = date('Y-m-d');
-            // crear la producto
-            $nuevo_producto = Producto::create(array_map('mb_strtoupper', $request->all()));
+            $nuevo_producto = CatalogoItem::create(array_map('mb_strtoupper', $request->all()));
 
-            $datos_original = HistorialAccion::getDetalleRegistro($nuevo_producto, "productos");
+            $datos_original = HistorialAccion::getDetalleRegistro($nuevo_producto, "catalogo_items");
             HistorialAccion::create([
                 'user_id' => Auth::user()->id,
                 'accion' => 'CREACIÓN',
-                'descripcion' => 'EL USUARIO ' . Auth::user()->usuario . ' REGISTRO UN PRODUCTO',
+                'descripcion' => 'EL USUARIO ' . Auth::user()->usuario . ' REGISTRO UN ITEM DEL CATÁLOGO',
                 'datos_original' => $datos_original,
                 'modulo' => 'PRODUCTOS',
                 'fecha' => date('Y-m-d'),
@@ -87,22 +131,19 @@ class ProductoController extends Controller
         }
     }
 
-
-
     public function storeJson(Request $request)
     {
         $request->validate($this->validacion, $this->mensajes);
         DB::beginTransaction();
         try {
             $request['fecha_registro'] = date('Y-m-d');
-            // crear la producto
-            $nuevo_producto = Producto::create(array_map('mb_strtoupper', $request->all()));
+            $nuevo_producto = CatalogoItem::create(array_map('mb_strtoupper', $request->all()));
 
-            $datos_original = HistorialAccion::getDetalleRegistro($nuevo_producto, "productos");
+            $datos_original = HistorialAccion::getDetalleRegistro($nuevo_producto, "catalogo_items");
             HistorialAccion::create([
                 'user_id' => Auth::user()->id,
                 'accion' => 'CREACIÓN',
-                'descripcion' => 'EL USUARIO ' . Auth::user()->usuario . ' REGISTRO UN PRODUCTO',
+                'descripcion' => 'EL USUARIO ' . Auth::user()->usuario . ' REGISTRO UN ITEM DEL CATÁLOGO',
                 'datos_original' => $datos_original,
                 'modulo' => 'PRODUCTOS',
                 'fecha' => date('Y-m-d'),
@@ -121,25 +162,25 @@ class ProductoController extends Controller
         }
     }
 
-    public function show(Producto $producto)
+    public function show(CatalogoItem $producto)
     {
         return response()->JSON($producto);
     }
 
-    public function update(Producto $producto, Request $request)
+    public function update(CatalogoItem $producto, Request $request)
     {
         $request->validate($this->validacion, $this->mensajes);
         DB::beginTransaction();
         try {
-            $datos_original = HistorialAccion::getDetalleRegistro($producto, "productos");
+            $datos_original = HistorialAccion::getDetalleRegistro($producto, "catalogo_items");
             $producto->update(array_map('mb_strtoupper', $request->all()));
             $producto->save();
 
-            $datos_nuevo = HistorialAccion::getDetalleRegistro($producto, "productos");
+            $datos_nuevo = HistorialAccion::getDetalleRegistro($producto, "catalogo_items");
             HistorialAccion::create([
                 'user_id' => Auth::user()->id,
                 'accion' => 'MODIFICACIÓN',
-                'descripcion' => 'EL USUARIO ' . Auth::user()->usuario . ' MODIFICÓ UN PRODUCTO',
+                'descripcion' => 'EL USUARIO ' . Auth::user()->usuario . ' MODIFICÓ UN ITEM DEL CATÁLOGO',
                 'datos_original' => $datos_original,
                 'datos_nuevo' => $datos_nuevo,
                 'modulo' => 'PRODUCTOS',
@@ -151,29 +192,28 @@ class ProductoController extends Controller
             return redirect()->route("productos.index")->with("bien", "Registro actualizado");
         } catch (\Exception $e) {
             DB::rollBack();
-            // Log::debug($e->getMessage());
             throw ValidationException::withMessages([
                 'error' =>  $e->getMessage(),
             ]);
         }
     }
 
-    public function destroy(Producto $producto)
+    public function destroy(CatalogoItem $producto)
     {
         DB::beginTransaction();
         try {
-            $usos = Ingreso::where("producto_id", $producto->id)->get();
+            $usos = IngresoDetalle::where("item_id", $producto->id)->get();
             if (count($usos) > 0) {
                 throw ValidationException::withMessages([
                     'error' =>  "No es posible eliminar este registro porque esta siendo utilizado por otros registros",
                 ]);
             }
-            $datos_original = HistorialAccion::getDetalleRegistro($producto, "productos");
+            $datos_original = HistorialAccion::getDetalleRegistro($producto, "catalogo_items");
             $producto->delete();
             HistorialAccion::create([
                 'user_id' => Auth::user()->id,
                 'accion' => 'ELIMINACIÓN',
-                'descripcion' => 'EL USUARIO ' . Auth::user()->usuario . ' ELIMINÓ UN PRODUCTO',
+                'descripcion' => 'EL USUARIO ' . Auth::user()->usuario . ' ELIMINÓ UN ITEM DEL CATÁLOGO',
                 'datos_original' => $datos_original,
                 'modulo' => 'PRODUCTOS',
                 'fecha' => date('Y-m-d'),

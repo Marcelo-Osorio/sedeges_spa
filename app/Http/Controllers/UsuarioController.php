@@ -5,7 +5,6 @@ namespace App\Http\Controllers;
 use App\Models\HistorialAccion;
 use App\Models\Ingreso;
 use App\Models\User;
-use App\Models\VentaLote;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -13,7 +12,6 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
-use PgSql\Lob;
 
 class UsuarioController extends Controller
 {

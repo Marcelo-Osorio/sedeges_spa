@@ -2,7 +2,7 @@ export function initDataTable(
     selector,
     columns,
     ajaxUrl = null,
-    additionalOptions = {}
+    additionalOptions = {},
 ) {
     const element = $(selector);
 

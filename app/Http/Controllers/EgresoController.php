@@ -29,7 +29,7 @@ class EgresoController extends Controller
             $egreso->cantidad = $cantidad;
 
             // editable?
-            if ($egreso->cantidad == $egreso->ingreso->cantidad) {
+            if ($egreso->cantidad == $egreso->ingreso_detalle->cantidad) {
                 $egreso->editable = 0;
             }
             $egreso->save();
@@ -42,7 +42,7 @@ class EgresoController extends Controller
                     IEInterno::create([
                         "egreso_id" => $egreso->id,
                         "almacen_id" => $destino_id,
-                        "producto_id" => $egreso->producto_id,
+                        "item_id" => $egreso->item_id,
                         "ingreso_id" => $egreso->ingreso_id,
                         "ingreso_detalle_id" => $egreso->ingreso_detalle_id,
                         "icantidad" => $egreso->cantidad,

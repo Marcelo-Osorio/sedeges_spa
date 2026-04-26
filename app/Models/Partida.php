@@ -12,7 +12,6 @@ class Partida extends Model
     protected $fillable = [
         "nro_partida",
         "nombre",
-        "abreviatura",
         "fecha_registro",
     ];
 

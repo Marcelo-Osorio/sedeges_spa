@@ -15,7 +15,7 @@ class Egreso extends Model
         "ingreso_detalle_id",
         "almacen_id",
         "partida_id",
-        "producto_id",
+        "item_id",
         "destino_id",
         "cantidad",
         "costo",
@@ -69,7 +69,7 @@ class Egreso extends Model
 
     public function producto()
     {
-        return $this->belongsTo(Producto::class, 'producto_id');
+        return $this->belongsTo(CatalogoItem::class, 'item_id');
     }
 
     public function ie_interno()

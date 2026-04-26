@@ -15,7 +15,7 @@ class IngresoDetalleRule implements ValidationRule
     public function validate(string $attribute, mixed $value, Closure $fail): void
     {
         foreach ($value as $item) {
-            if (!$item["partida_id"] || !$item["producto_id"] || !$item["unidad_medida_id"] || !$item["cantidad"] || !$item["costo"] || !$item["total"]) {
+            if (!$item["partida_id"] || !$item["item_id"] || !$item["unidad_medida_id"] || !$item["cantidad"] || !$item["costo"] || !$item["total"]) {
                 $fail("Debes completar todos los campos de la tabla");
             }
         }

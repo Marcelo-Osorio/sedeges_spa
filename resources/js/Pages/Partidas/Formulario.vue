@@ -163,25 +163,6 @@ onMounted(() => {});
                                     </li>
                                 </ul>
                             </div>
-                            <div class="col-md-6">
-                                <label>Abreviatura*</label>
-                                <input
-                                    type="text"
-                                    class="form-control"
-                                    :class="{
-                                        'parsley-error': form.errors?.abreviatura,
-                                    }"
-                                    v-model="form.abreviatura"
-                                />
-                                <ul
-                                    v-if="form.errors?.abreviatura"
-                                    class="parsley-errors-list filled"
-                                >
-                                    <li class="parsley-required">
-                                        {{ form.errors?.abreviatura }}
-                                    </li>
-                                </ul>
-                            </div>
                         </div>
                     </form>
                 </div>

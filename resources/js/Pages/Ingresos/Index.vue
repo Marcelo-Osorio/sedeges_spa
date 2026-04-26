@@ -81,9 +81,9 @@ const columns = [
         render: function (data, type, row) {
             let buttons = ``;
             // if(row.d_no){
-                buttons += `<button class="rounded-0 btn btn-primary mr-1 pdf" data-id="${row.id}"><i class="fa fa-print"></i></button>`;
+            buttons += `<button class="rounded-0 btn btn-primary mr-1 pdf" data-id="${row.id}"><i class="fa fa-print"></i></button>`;
             // }
-            
+
             // if(row.d_si){
             //     buttons += `<button class="rounded-0 btn btn-success mr-1 pdf2" data-id="${row.id}"><i class="fa fa-print"></i></button>`;
             // }
@@ -104,7 +104,7 @@ const columns = [
                  data-nombre="${row.id ?? "S/P"}"
                  data-url="${route(
                      "ingresos.destroy",
-                     row.id
+                     row.id,
                  )}"><i class="fa fa-trash"></i></button>`;
             }
             return buttons;
@@ -180,7 +180,7 @@ onMounted(async () => {
         "#table-ingreso",
         columns,
         route("ingresos.api"),
-        { ordering: false }
+        { ordering: false },
     );
     datatableInitialized.value = true;
     accionesRow();
@@ -218,7 +218,7 @@ onBeforeUnmount(() => {
                             v-if="
                                 props_page.auth?.user.permisos == '*' ||
                                 props_page.auth?.user.permisos.includes(
-                                    'ingresos.create'
+                                    'ingresos.create',
                                 )
                             "
                             type="button"

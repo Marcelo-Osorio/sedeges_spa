@@ -9,6 +9,8 @@ use App\Models\UnidadMedida;
 use App\Models\User;
 use Illuminate\Database\Console\Seeds\WithoutModelEvents;
 use Illuminate\Database\Seeder;
+use Illuminate\Support\Facades\Hash;
+
 
 class UserTableSeeder extends Seeder
 {
@@ -45,7 +47,7 @@ class UserTableSeeder extends Seeder
             "dir" => "",
             "email" => "",
             "fono" => "",
-            "password" => "$2y$12$65d4fgZsvBV5Lc/AxNKh4eoUdbGyaczQ4sSco20feSQANshNLuxSC",
+            "password" => Hash::make("admin123"),
             "foto" => null,
             "tipo" => "",
             "cargo_id" => 1,

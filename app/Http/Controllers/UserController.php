@@ -5,9 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Egreso;
 use App\Models\Ingreso;
 use App\Models\IngresoDetalle;
-use App\Models\Lote;
 use App\Models\User;
-use App\Models\VentaLote;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -81,7 +79,7 @@ class UserController extends Controller
                     'color' => 'bg-primary',
                     'icon' => "fa-list",
                     "link" => true,
-                    "url" => route("almacens.index", 1)
+                    "url" => route("almacens.index", ["g" => "CENTROS"])
                 ];
             }
 
@@ -95,7 +93,7 @@ class UserController extends Controller
                     'color' => 'bg-warning',
                     'icon' => "fa-list",
                     "link" => true,
-                    "url" => route("almacens.index", 2)
+                    "url" => route("almacens.index", ["g" => "PROGRAMAS"])
                 ];
             }
 
@@ -108,7 +106,7 @@ class UserController extends Controller
                     'color' => 'bg-danger',
                     'icon' => "fa-list",
                     "link" => true,
-                    "url" => route("almacens.index", 3)
+                    "url" => route("almacens.index", ["g" => "FARMACIAS"])
                 ];
             }
 
@@ -120,7 +118,7 @@ class UserController extends Controller
                     'color' => 'bg-purple',
                     'icon' => "fa-list",
                     "link" => true,
-                    "url" => route("almacens.index", 3)
+                    "url" => route("almacens.index", ["g" => "CENTRAL"])
                 ];
             }
         }
@@ -151,6 +149,6 @@ class UserController extends Controller
         }
         $egresos = $egresos->sum("egresos.total");
         $total = $ingresos - $egresos;
-        return $total;
+        return round($total, 2);
     }
 }

@@ -107,7 +107,7 @@ onMounted(() => {
                                 <button
                                     class="btn btn-primary"
                                     block
-                                    @click="generarReporte"
+                                    type="submit"
                                     :disabled="generando"
                                     v-text="txtBtn"
                                 ></button>

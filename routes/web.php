@@ -8,9 +8,8 @@ use App\Http\Controllers\EgresoController;
 use App\Http\Controllers\IEInternoController;
 use App\Http\Controllers\IngresoController;
 use App\Http\Controllers\InicioController;
-use App\Http\Controllers\PacienteController;
+use App\Http\Controllers\CatalogoItemController;
 use App\Http\Controllers\PartidaController;
-use App\Http\Controllers\ProductoController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\ProgramaController;
 use App\Http\Controllers\ReporteController;
@@ -19,7 +18,6 @@ use App\Http\Controllers\UnidadController;
 use App\Http\Controllers\UnidadMedidaController;
 use App\Http\Controllers\UserController;
 use App\Http\Controllers\UsuarioController;
-use App\Models\Ingreso;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 
@@ -39,24 +37,6 @@ Route::get('/login', function () {
 
 Route::get("configuracions/getConfiguracion", [ConfiguracionController::class, 'getConfiguracion'])->name("configuracions.getConfiguracion");
 
-Route::get("ingresos/iniciaDetalles", function () {
-    $ingresos = Ingreso::all();
-
-    foreach ($ingresos as $ingreso) {
-        $ingreso->ingreso_detalles()->create([
-            "almacen_id" => $ingreso->almacen_id,
-            "unidad_id" => $ingreso->unidad_id,
-            "partida_id" => $ingreso->partida_id,
-            "producto_id" => $ingreso->producto_id,
-            "unidad_medida_id" => $ingreso->unidad_medida_id,
-            "cantidad" => $ingreso->cantidad,
-            "costo" => $ingreso->costo,
-            "total" => $ingreso->total,
-        ]);
-    }
-
-    return 'Correcto <a href="/">Volver</a>';
-});
 
 Route::middleware(['auth', 'permisoUsuario'])->prefix("admin")->group(function () {
     // INICIO
@@ -147,11 +127,13 @@ Route::middleware(['auth', 'permisoUsuario'])->prefix("admin")->group(function (
     );
 
     // PRODUCTOS
-    Route::get("productos/api", [ProductoController::class, 'api'])->name("productos.api");
-    Route::get("productos/paginado", [ProductoController::class, 'paginado'])->name("productos.paginado");
-    Route::get("productos/listado", [ProductoController::class, 'listado'])->name("productos.listado");
-    Route::post("productos/storeJson", [ProductoController::class, 'storeJson'])->name("productos.storeJson");
-    Route::resource("productos", ProductoController::class)->only(
+    Route::get("productos/api", [CatalogoItemController::class, 'api'])->name("productos.api");
+    Route::get("productos/paginado", [CatalogoItemController::class, 'paginado'])->name("productos.paginado");
+    Route::get("productos/listado", [CatalogoItemController::class, 'listado'])->name("productos.listado");
+    Route::get("productos/grupos", [CatalogoItemController::class, 'grupos'])->name("productos.grupos");
+    Route::get("productos/para_formulario", [CatalogoItemController::class, 'para_formulario'])->name("productos.para_formulario");
+    Route::post("productos/storeJson", [CatalogoItemController::class, 'storeJson'])->name("productos.storeJson");
+    Route::resource("productos", CatalogoItemController::class)->only(
         ["index", "store", "update", "show", "destroy"]
     );
 

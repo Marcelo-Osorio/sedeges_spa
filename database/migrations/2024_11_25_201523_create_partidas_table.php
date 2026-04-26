@@ -6,24 +6,17 @@ use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
-    /**
-     * Run the migrations.
-     */
     public function up(): void
     {
         Schema::create('partidas', function (Blueprint $table) {
             $table->id();
             $table->string("nro_partida");
             $table->string("nombre");
-            $table->string("abreviatura");
             $table->date("fecha_registro")->nullable();
             $table->timestamps();
         });
     }
 
-    /**
-     * Reverse the migrations.
-     */
     public function down(): void
     {
         Schema::dropIfExists('partidas');

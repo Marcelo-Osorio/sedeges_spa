@@ -15,6 +15,7 @@ const form = ref({
     fecha_ini: obtenerFechaActual(),
     fecha_fin: obtenerFechaActual(),
     tipo: "pdf",
+    donacion: "NO",
 });
 
 const generando = ref(false);
@@ -34,6 +35,11 @@ const listFormato = ref([
 const listTipo = ref([
     { value: "pdf", label: "PDF" },
     { value: "excel", label: "EXCEL" },
+]);
+
+const listDonacion = ref([
+    { value: "SI", label: "Sí (Donación)" },
+    { value: "NO", label: "No (Donación)" },
 ]);
 
 const generarReporte = () => {
@@ -93,6 +99,21 @@ onMounted(() => {
                                 </div>
                             </div>
                             <div class="col-md-12 mt-2">
+                                <label>Donación</label>
+                                <select
+                                    v-model="form.donacion"
+                                    class="form-control"
+                                >
+                                    <option
+                                        v-for="item in listDonacion"
+                                        :key="item.value"
+                                        :value="item.value"
+                                    >
+                                        {{ item.label }}
+                                    </option>
+                                </select>
+                            </div>
+                            <div class="col-md-12 mt-2">
                                 <label>Seleccionar tipo reporte</label>
                                 <select
                                     :hide-details="
@@ -119,7 +140,7 @@ onMounted(() => {
                                 <button
                                     class="btn btn-primary"
                                     block
-                                    @click="generarReporte"
+                                    type="submit"
                                     :disabled="generando"
                                     v-text="txtBtn"
                                 ></button>

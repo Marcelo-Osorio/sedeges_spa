@@ -5,6 +5,8 @@ import { usePage } from "@inertiajs/vue3";
 const oProducto = ref({
     id: 0,
     nombre: "",
+    grupo: "",
+    abreviatura: "",
     _method: "POST",
 });
 
@@ -136,6 +138,8 @@ export const useProductos = () => {
         if (item) {
             oProducto.value.id = item.id;
             oProducto.value.nombre = item.nombre;
+            oProducto.value.grupo = item.grupo || "";
+            oProducto.value.abreviatura = item.abreviatura || "";
             oProducto.value._method = "PUT";
             return oProducto;
         }
@@ -145,6 +149,8 @@ export const useProductos = () => {
     const limpiarProducto = () => {
         oProducto.value.id = 0;
         oProducto.value.nombre = "";
+        oProducto.value.grupo = "";
+        oProducto.value.abreviatura = "";
         oProducto.value._method = "POST";
     };
 

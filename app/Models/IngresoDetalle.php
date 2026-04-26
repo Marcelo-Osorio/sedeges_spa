@@ -15,7 +15,7 @@ class IngresoDetalle extends Model
         "unidad_id",
         "partida_id",
         "donacion",
-        "producto_id",
+        "item_id",
         "unidad_medida_id",
         "cantidad",
         "costo",
@@ -44,7 +44,7 @@ class IngresoDetalle extends Model
 
     public function producto()
     {
-        return $this->belongsTo(Producto::class, 'producto_id');
+        return $this->belongsTo(CatalogoItem::class, 'item_id');
     }
 
     public function unidad_medida()
